@@ -1,216 +1,139 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Live Spanish → English Translator</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background-color: #f4f7f6;
-      margin: 0;
-      padding: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: flex-start;
-      min-height: 100vh;
-    }
-
-    .container {
-      width: 95%;
-      max-width: 600px;
-      background-color: #fff;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
-      padding: 20px;
-      margin-top: 20px;
-    }
-
-    h1 {
-      color: #333;
-      text-align: center;
-      font-size: 1.5rem;
-    }
-
-    button {
-      width: 100%;
-      padding: 18px;
-      font-size: 1.2rem;
-      background-color: #4CAF50;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      margin: 15px 0;
-      touch-action: manipulation;
-    }
-    button:hover { background-color: #45a049; }
-
-    .output {
-      margin: 10px 0;
-      padding: 15px;
-      background-color: #e9ecef;
-      border-radius: 8px;
-      min-height: 60px;
-      font-size: 1.1rem;
-      word-wrap: break-word;
-    }
-
-    .queue {
-      margin-top: 15px;
-      max-height: 300px;
-      overflow-y: auto;
-      padding: 10px;
-      background-color: #f8f9fa;
-      border-radius: 8px;
-    }
-
-    .queue-item {
-      margin-bottom: 10px;
-      padding: 10px;
-      background-color: #ffffff;
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      font-size: 1rem;
-    }
-
-    .status {
-      font-weight: bold;
-      margin-top: 10px;
-      color: #555;
-      text-align: center;
-    }
-
-    @media (max-width: 400px) {
-      h1 { font-size: 1.3rem; }
-      button { font-size: 1rem; padding: 14px; }
-      .output { font-size: 1rem; min-height: 50px; }
-      .queue-item { font-size: 0.95rem; padding: 8px; }
-    }
-  </style>
+<meta charset="UTF-8">
+<title>Live Spanish → English Translator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #f4f7f6;
+  margin:0;padding:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  min-height:100vh;
+}
+.container {
+  width:95%;
+  max-width:600px;
+  background:#fff;
+  border-radius:12px;
+  box-shadow:0 4px 12px rgba(0,0,0,0.12);
+  padding:20px;
+  margin-top:20px;
+}
+h1 { text-align:center; font-size:1.5rem; color:#333; }
+button {
+  width:100%;
+  padding:18px;
+  font-size:1.2rem;
+  background:#4CAF50;
+  color:#fff;
+  border:none;
+  border-radius:8px;
+  cursor:pointer;
+}
+button:hover { background:#45a049; }
+.output { margin:10px 0; padding:15px; background:#e9ecef; border-radius:8px; min-height:60px; font-size:1.1rem; word-wrap:break-word; }
+.queue { margin-top:15px; max-height:300px; overflow-y:auto; padding:10px; background:#f8f9fa; border-radius:8px; }
+.queue-item { margin-bottom:10px; padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; font-size:1rem; }
+.status { font-weight:bold; margin-top:10px; color:#555; text-align:center; }
+</style>
 </head>
 <body>
+<div class="container">
+<h1>🎤 Live Spanish → English Translator</h1>
+<button id="toggleBtn">▶️ Start Recording</button>
+<div id="recognized" class="output">Recognized Spanish will appear here...</div>
+<div id="translated" class="output">Translated English will appear here...</div>
+<div id="status" class="status">Status: Ready</div>
+<h3>Translation Queue:</h3>
+<div id="queue" class="queue"></div>
+</div>
 
-  <div class="container">
-    <h1>🎤 Live Spanish → English Translator</h1>
-    <button id="toggleBtn">▶️ Start Recording</button>
+<script>
+const toggleBtn=document.getElementById("toggleBtn");
+const recognizedEl=document.getElementById("recognized");
+const translatedEl=document.getElementById("translated");
+const statusEl=document.getElementById("status");
+const queueEl=document.getElementById("queue");
 
-    <div id="recognized" class="output">Recognized Spanish will appear here...</div>
-    <div id="translated" class="output">Translated English will appear here...</div>
+const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+if(!SpeechRecognition){ alert("Use Chrome or Edge for Speech Recognition."); }
 
-    <div id="status" class="status">Status: Ready</div>
+let recognition=new SpeechRecognition();
+recognition.continuous=true;
+recognition.interimResults=false;
+recognition.lang="es-ES";
 
-    <h3>Translation Queue:</h3>
-    <div id="queue" class="queue"></div>
-  </div>
+let recording=false;
+let ttsQueue=[];
+let ttsProcessing=false;
 
-  <script>
-    const toggleBtn = document.getElementById("toggleBtn");
-    const recognizedEl = document.getElementById("recognized");
-    const translatedEl = document.getElementById("translated");
-    const statusEl = document.getElementById("status");
-    const queueEl = document.getElementById("queue");
+async function processTTSQueue(){
+  if(ttsProcessing||ttsQueue.length===0) return;
+  ttsProcessing=true;
+  const phrase=ttsQueue.shift();
+  const utter=new SpeechSynthesisUtterance(phrase);
+  utter.lang="en-US";
+  utter.onend=()=>{ ttsProcessing=false; processTTSQueue(); }
+  speechSynthesis.speak(utter);
+}
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Your browser does not support Speech Recognition. Use Chrome or Edge.");
+async function translateText(text){
+  try{
+    const response=await fetch("https://api.mymemory.translated.net/get?q="+encodeURIComponent(text)+"&langpair=es|en");
+    const data=await response.json();
+    return data.responseData.translatedText || "Translation failed";
+  }catch(err){
+    console.error(err);
+    return "Translation error";
+  }
+}
+
+recognition.onresult=async(event)=>{
+  for(let i=event.resultIndex;i<event.results.length;i++){
+    if(event.results[i].isFinal){
+      const phrase=event.results[i][0].transcript.trim();
+      if(!phrase) continue;
+
+      recognizedEl.textContent=phrase;
+      statusEl.textContent="Status: Translating...";
+
+      const translatedText=await translateText(phrase);
+      translatedEl.textContent=translatedText;
+
+      const queueItem=document.createElement("div");
+      queueItem.classList.add("queue-item");
+      queueItem.textContent=`${phrase} → ${translatedText}`;
+      queueEl.appendChild(queueItem);
+      queueEl.scrollTop=queueEl.scrollHeight;
+
+      ttsQueue.push(translatedText);
+      processTTSQueue();
+
+      statusEl.textContent="Status: Listening...";
     }
+  }
+};
 
-    let recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.lang = "es-ES";
+recognition.onerror=(e)=>{ console.error(e); statusEl.textContent="Recognition error: "+e.error; }
+recognition.onend=()=>{ if(recording) recognition.start(); }
 
-    let recording = false;
-    let ttsQueue = [];
-    let ttsProcessing = false;
-
-    // Sequentially speak translated phrases
-    async function processTTSQueue() {
-      if (ttsProcessing || ttsQueue.length === 0) return;
-      ttsProcessing = true;
-
-      const phrase = ttsQueue.shift();
-      const utter = new SpeechSynthesisUtterance(phrase);
-      utter.lang = "en-US";
-      utter.onend = () => {
-        ttsProcessing = false;
-        processTTSQueue();
-      };
-      speechSynthesis.speak(utter);
-    }
-
-    // Translate Spanish text to English using Argos Open Tech
-    async function translateText(text) {
-      try {
-        const response = await fetch("https://translate.argosopentech.com/translate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            q: text,
-            source: "es",
-            target: "en",
-            format: "text"
-          })
-        });
-        const data = await response.json();
-        return data.translatedText || "Translation failed";
-      } catch (err) {
-        console.error(err);
-        return "Translation error";
-      }
-    }
-
-    recognition.onresult = async (event) => {
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          const phrase = event.results[i][0].transcript.trim();
-          if (!phrase) continue;
-
-          recognizedEl.textContent = phrase;
-          statusEl.textContent = "Status: Translating...";
-
-          const translatedText = await translateText(phrase);
-          translatedEl.textContent = translatedText;
-
-          const queueItem = document.createElement("div");
-          queueItem.classList.add("queue-item");
-          queueItem.textContent = `${phrase} → ${translatedText}`;
-          queueEl.appendChild(queueItem);
-          queueEl.scrollTop = queueEl.scrollHeight; // Auto-scroll
-
-          ttsQueue.push(translatedText);
-          processTTSQueue();
-
-          statusEl.textContent = "Status: Listening...";
-        }
-      }
-    };
-
-    recognition.onerror = (e) => {
-      console.error(e);
-      statusEl.textContent = "Recognition error: " + e.error;
-    };
-
-    recognition.onend = () => {
-      if (recording) recognition.start();
-    };
-
-    toggleBtn.addEventListener("click", () => {
-      if (!recording) {
-        recognition.start();
-        recording = true;
-        toggleBtn.textContent = "⏹️ Stop Recording";
-        statusEl.textContent = "Status: Listening...";
-      } else {
-        recognition.stop();
-        recording = false;
-        toggleBtn.textContent = "▶️ Start Recording";
-        statusEl.textContent = "Status: Stopped";
-      }
-    });
-  </script>
-
+toggleBtn.addEventListener("click",()=>{
+  if(!recording){
+    recognition.start();
+    recording=true;
+    toggleBtn.textContent="⏹️ Stop Recording";
+    statusEl.textContent="Status: Listening...";
+  }else{
+    recognition.stop();
+    recording=false;
+    toggleBtn.textContent="▶️ Start Recording";
+    statusEl.textContent="Status: Stopped";
+  }
+});
+</script>
 </body>
 </html>
