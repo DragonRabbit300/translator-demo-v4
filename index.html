@@ -81,11 +81,21 @@ async function processTTSQueue(){
   speechSynthesis.speak(utter);
 }
 
+// Use CORS-friendly LibreTranslate endpoint
 async function translateText(text){
   try{
-    const response=await fetch("https://api.mymemory.translated.net/get?q="+encodeURIComponent(text)+"&langpair=es|en");
+    const response=await fetch("https://libretranslate.de/translate", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify({
+        q:text,
+        source:"es",
+        target:"en",
+        format:"text"
+      })
+    });
     const data=await response.json();
-    return data.responseData.translatedText || "Translation failed";
+    return data.translatedText || "Translation failed";
   }catch(err){
     console.error(err);
     return "Translation error";
