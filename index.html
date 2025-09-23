@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Realtime Translator Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 2rem;
+    }
+    #output, #translated {
+      margin: 1rem 0;
+      padding: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      min-height: 50px;
+    }
+    button {
+      margin: 0.5rem;
+      padding: 0.7rem 1.2rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    #startBtn { background: #4CAF50; color: white; }
+    #stopBtn { background: #f44336; color: white; }
+  </style>
+</head>
+<body>
+  <h1>🌍 Real-Time Translator Demo</h1>
+  <p>Click "Start" and speak — your words will be recognized, translated, and spoken back.</p>
+
+  <button id="startBtn">🎤 Start</button>
+  <button id="stopBtn">🛑 Stop</button>
+
+  <h3>Recognized Speech:</h3>
+  <div id="output">...</div>
+
+  <h3>Translated Speech:</h3>
+  <div id="translated">...</div>
+
+  <script>
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+
+    if (!recognition) {
+      alert("Sorry, your browser does not support speech recognition.");
+    } else {
+      recognition.lang = "en-US";  // change if you want to recognize a different input language.
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      const outputEl = document.getElementById("output");
+      const translatedEl = document.getElementById("translated");
+
+      // LibreTranslate endpoint & settings
+      const TRANSLATE_API_URL = "https://libretranslate.de/translate";  // hosted instance
+      const TARGET_LANG = "es";  // translate to Spanish; change as desired
+
+      recognition.onresult = async (event) => {
+        const speechText = event.results[0][0].transcript;
+        outputEl.textContent = speechText;
+
+        try {
+          const resp = await fetch(TRANSLATE_API_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              q: speechText,
+              source: "en",    // input language code
+              target: TARGET_LANG,
+              format: "text"
+            })
+          });
+
+          if (!resp.ok) {
+            translatedEl.textContent = "Translation error: " + resp.statusText;
+            return;
+          }
+
+          const data = await resp.json();
+          const translatedText = data.translatedText;
+          translatedEl.textContent = translatedText;
+
+          // Speak the translated text
+          const utterance = new SpeechSynthesisUtterance(translatedText);
+          utterance.lang = "es-ES";  // match with target language
+          speechSynthesis.cancel();  // stop any ongoing speech
+          speechSynthesis.speak(utterance);
+
+        } catch (err) {
+          translatedEl.textContent = "Error: " + err.message;
+        }
+      };
+
+      document.getElementById("startBtn").onclick = () => {
+        recognition.start();
+      };
+      document.getElementById("stopBtn").onclick = () => {
+        recognition.stop();
+      };
+    }
+  </script>
+</body>
+</html>
