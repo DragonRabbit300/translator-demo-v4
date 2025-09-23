@@ -1,109 +1,198 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Realtime Translator Demo</title>
+  <meta charset="utf-8" />
+  <title>Real-Time Translator — Debuggable Version</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin: 2rem;
-    }
-    #output, #translated {
-      margin: 1rem 0;
-      padding: 1rem;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      min-height: 50px;
-    }
-    button {
-      margin: 0.5rem;
-      padding: 0.7rem 1.2rem;
-      font-size: 1rem;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    #startBtn { background: #4CAF50; color: white; }
-    #stopBtn { background: #f44336; color: white; }
+    body { font-family: Arial, Helvetica, sans-serif; padding: 1.5rem; max-width: 820px; margin: auto;}
+    h1 { text-align:center; }
+    #controls {display:flex; gap:0.5rem; justify-content:center; margin-bottom:1rem;}
+    button { padding:0.6rem 1rem; border-radius:6px; border:none; cursor:pointer;}
+    #startBtn { background:#2e8b57; color:white;}
+    #stopBtn { background:#c0392b; color:white;}
+    .box { border:1px solid #ddd; padding:0.9rem; border-radius:8px; margin:0.6rem 0; min-height:48px; }
+    label { display:block; margin-top:0.6rem; font-weight:600; }
+    select,input[type="text"]{ padding:0.5rem; margin-top:0.3rem; width:100%; box-sizing:border-box;}
+    #status { margin-top:0.6rem; font-size:0.95rem; color:#333;}
+    #log { background:#111; color:#eee; padding:0.6rem; border-radius:6px; font-family:monospace; font-size:0.85rem; max-height:160px; overflow:auto; margin-top:0.6rem;}
   </style>
 </head>
 <body>
-  <h1>🌍 Real-Time Translator Demo</h1>
-  <p>Click "Start" and speak — your words will be recognized, translated, and spoken back.</p>
+  <h1>Real-Time Translator — Debug Version</h1>
 
-  <button id="startBtn">🎤 Start</button>
-  <button id="stopBtn">🛑 Stop</button>
+  <div id="controls">
+    <button id="startBtn">🎤 Start</button>
+    <button id="stopBtn">🛑 Stop</button>
+  </div>
 
-  <h3>Recognized Speech:</h3>
-  <div id="output">...</div>
+  <div>
+    <label>Input language (recognition):</label>
+    <select id="inputLang">
+      <option value="en-US" selected>English (en-US)</option>
+      <option value="es-ES">Spanish (es-ES)</option>
+      <option value="fr-FR">French (fr-FR)</option>
+      <option value="de-DE">German (de-DE)</option>
+      <!-- add more as needed -->
+    </select>
+  </div>
 
-  <h3>Translated Speech:</h3>
-  <div id="translated">...</div>
+  <div>
+    <label>Target language (translation):</label>
+    <select id="targetLang">
+      <option value="es" selected>Spanish (es)</option>
+      <option value="en">English (en)</option>
+      <option value="fr">French (fr)</option>
+      <option value="de">German (de)</option>
+    </select>
+  </div>
+
+  <h3>Recognized speech:</h3>
+  <div id="recognized" class="box">—</div>
+
+  <h3>Translated text:</h3>
+  <div id="translated" class="box">—</div>
+
+  <label>Manual test (type text and click Translate) — useful to test translation endpoint separately:</label>
+  <input id="manualText" type="text" placeholder="Type something to translate" />
+  <div style="margin-top:0.5rem; display:flex; gap:0.5rem;">
+    <button id="manualTranslate">Translate text (manual)</button>
+    <button id="speakTranslated">🔊 Speak translated</button>
+  </div>
+
+  <div id="status">Status: ready</div>
+  <div id="log"></div>
 
   <script>
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+    // ---------- UI helpers ----------
+    const logEl = document.getElementById('log');
+    function log(...args){ const line = args.map(a => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' '); logEl.innerText = line + '\n' + logEl.innerText; console.log(...args); }
+    function setStatus(s){ document.getElementById('status').innerText = 'Status: ' + s; }
 
-    if (!recognition) {
-      alert("Sorry, your browser does not support speech recognition.");
+    // ---------- endpoints to try (order matters) ----------
+    const TRANSLATE_ENDPOINTS = [
+      "https://libretranslate.de/translate",
+      "https://translate.argosopentech.com/translate",
+      // "https://libretranslate.com/translate" // optional; may require API key or be rate-limited
+    ];
+
+    // ---------- basic language code mapping for TTS voices ----------
+    const voiceMap = { en: 'en-US', es: 'es-ES', fr:'fr-FR', de:'de-DE' };
+    function ttsLangFromTarget(target) {
+      return voiceMap[target] || (target + '-' + target.toUpperCase());
+    }
+
+    // ---------- translation function that tries multiple endpoints ----------
+    async function translateText(text, sourceCode='auto', targetCode='es') {
+      setStatus('translating...');
+      log('Translating:', {text, source: sourceCode, target: targetCode});
+      for (const url of TRANSLATE_ENDPOINTS) {
+        try {
+          // small timeout wrapper (8s)
+          const controller = new AbortController();
+          const timeout = setTimeout(()=> controller.abort(), 8000);
+          const body = { q: text, source: sourceCode, target: targetCode, format: "text" };
+          const resp = await fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+            signal: controller.signal
+          });
+          clearTimeout(timeout);
+          if (!resp.ok) {
+            log('Endpoint responded non-OK:', url, resp.status, resp.statusText);
+            continue; // try next
+          }
+          const data = await resp.json();
+          // many LibreTranslate-like endpoints return { translatedText: "..." }
+          if (data.translatedText) {
+            log('Translation succeeded via', url);
+            return { text: data.translatedText, via: url };
+          }
+          // some endpoints (rare) may return { result: "..." } or plain string; handle ambigous shapes:
+          const plainText = typeof data === 'string' ? data : (data.result || data.translation || null);
+          if (plainText) {
+            return { text: plainText, via: url };
+          }
+          log('Unexpected translation response shape from', url, data);
+        } catch (err) {
+          log('Error using', url, err && err.message ? err.message : err);
+          // continue to next endpoint
+        }
+      }
+      // all endpoints failed
+      throw new Error('All translation endpoints failed (possible CORS/network/endpoint-down). See console logs.');
+    }
+
+    // ---------- Speech recognition setup ----------
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+    if (!SpeechRecognition) {
+      setStatus('SpeechRecognition not supported in this browser.');
+      log('SpeechRecognition not supported.');
     } else {
-      recognition.lang = "en-US";  // change if you want to recognize a different input language.
+      recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.interimResults = false;
 
-      const outputEl = document.getElementById("output");
-      const translatedEl = document.getElementById("translated");
+      recognition.onstart = () => setStatus('listening (speak now)...');
+      recognition.onaudiostart = () => log('audio started');
+      recognition.onend = () => setStatus('idle');
 
-      // LibreTranslate endpoint & settings
-      const TRANSLATE_API_URL = "https://libretranslate.de/translate";  // hosted instance
-      const TARGET_LANG = "es";  // translate to Spanish; change as desired
+      recognition.onerror = (evt) => {
+        setStatus('recognition error: ' + (evt.error || 'unknown'));
+        log('recognition.onerror', evt);
+      };
 
-      recognition.onresult = async (event) => {
-        const speechText = event.results[0][0].transcript;
-        outputEl.textContent = speechText;
-
+      recognition.onresult = async (evt) => {
         try {
-          const resp = await fetch(TRANSLATE_API_URL, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              q: speechText,
-              source: "en",    // input language code
-              target: TARGET_LANG,
-              format: "text"
-            })
-          });
-
-          if (!resp.ok) {
-            translatedEl.textContent = "Translation error: " + resp.statusText;
-            return;
-          }
-
-          const data = await resp.json();
-          const translatedText = data.translatedText;
-          translatedEl.textContent = translatedText;
-
-          // Speak the translated text
-          const utterance = new SpeechSynthesisUtterance(translatedText);
-          utterance.lang = "es-ES";  // match with target language
-          speechSynthesis.cancel();  // stop any ongoing speech
-          speechSynthesis.speak(utterance);
-
+          const txt = Array.from(evt.results).map(r => r[0].transcript).join(' ').trim();
+          document.getElementById('recognized').innerText = txt || '—';
+          log('Recognized:', txt);
+          // pick language codes:
+          const inLang = document.getElementById('inputLang').value; // e.g. "en-US"
+          const sourceCode = inLang.split('-')[0] || 'auto';
+          const targetCode = document.getElementById('targetLang').value; // e.g. "es"
+          // Translate
+          const result = await translateText(txt, sourceCode, targetCode);
+          document.getElementById('translated').innerText = result.text;
+          setStatus('translated via: ' + result.via);
+          log('Final translation:', result);
+          // speak
+          const utter = new SpeechSynthesisUtterance(result.text);
+          utter.lang = ttsLangFromTarget(targetCode);
+          speechSynthesis.cancel();
+          speechSynthesis.speak(utter);
         } catch (err) {
-          translatedEl.textContent = "Error: " + err.message;
+          const m = err && err.message ? err.message : String(err);
+          document.getElementById('translated').innerText = 'Translation error: ' + m;
+          setStatus('translation failed');
+          log('translateText error:', err);
         }
       };
-
-      document.getElementById("startBtn").onclick = () => {
-        recognition.start();
-      };
-      document.getElementById("stopBtn").onclick = () => {
-        recognition.stop();
-      };
     }
-  </script>
-</body>
-</html>
+
+    // ---------- UI wiring ----------
+    document.getElementById('startBtn').addEventListener('click', () => {
+      if (!recognition) {
+        alert('SpeechRecognition not supported in this browser. Use Chrome on desktop/Android for best results.');
+        return;
+      }
+      // set recognition language from select
+      recognition.lang = document.getElementById('inputLang').value;
+      try {
+        recognition.start();
+      } catch (err) {
+        log('recognition.start() threw', err);
+      }
+    });
+    document.getElementById('stopBtn').addEventListener('click', () => {
+      if (recognition) recognition.stop();
+    });
+
+    // manual translation test
+    document.getElementById('manualTranslate').addEventListener('click', async () => {
+      const t = document.getElementById('manualText').value.trim();
+      if (!t) return alert('Type something first.');
+      try {
+        const srcCode = document.getElementById('inputLang').value.split('-')[0]
