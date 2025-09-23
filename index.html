@@ -5,7 +5,6 @@
     <title>Live Spanish → English Translator</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        /* Your existing CSS remains unchanged */
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #f4f7f6;
@@ -54,6 +53,51 @@
     </div>
 
     <script>
+        class TranslationService {
+            constructor() {
+                this.services = {
+                    libretranslate: {
+                        url: 'https://libretranslate.com/translate',
+                        params: (text) => ({
+                            q: text,
+                            source: 'es',
+                            target: 'en',
+                            format: 'text',
+                            api_key: ''  // No API key required
+                        }),
+                        parse: (data) => data.translatedText || "Translation failed"
+                    }
+                };
+                this.currentService = 'libretranslate';
+            }
+
+            async translate(text) {
+                try {
+                    const service = this.services[this.currentService];
+                    const response = await fetch(service.url, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'Accept': 'application/json'
+                        },
+                        body: new URLSearchParams(service.params(text))
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Translation service unavailable: ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    return service.parse(data);
+                } catch (error) {
+                    console.error('Translation error:', error);
+                    throw error;
+                }
+            }
+        }
+
+        const translationService = new TranslationService();
+
         const toggleBtn = document.getElementById("toggleBtn");
         const recognizedEl = document.getElementById("recognized");
         const translatedEl = document.getElementById("translated");
@@ -87,19 +131,8 @@
 
         async function translateText(text) {
             try {
-                const url = 'https://api.mymemory.translated.net/get';
-                const params = new URLSearchParams({
-                    q: text,
-                    langpair: 'es-en'
-                });
-                
-                const response = await fetch(`${url}?${params}`);
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                
-                const data = await response.json();
-                return data.responseData.translatedText || "Translation failed";
-            } catch (err) {
-                console.error('Translation error:', err);
+                return await translationService.translate(text);
+            } catch (error) {
                 return "Translation service unavailable";
             }
         }
