@@ -1,134 +1,141 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Live Spanish → English Translator</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { font-family: Arial, sans-serif; text-align: center; margin: 2rem; }
-    #recognized, #translated { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; min-height: 50px; margin: 1rem 0; }
-    button { padding: 0.7rem 1.2rem; font-size: 1rem; border: none; border-radius: 6px; cursor: pointer; background: #4CAF50; color: white; }
-    #status { margin-top: 0.5rem; font-weight: bold; }
-    #queue { margin-top: 2rem; text-align: left; max-height: 200px; overflow-y: auto; }
-    .queue-item { margin-bottom: 0.5rem; }
-  </style>
+<meta charset="UTF-8">
+<title>Live Spanish → English Translator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body { font-family: Arial, sans-serif; text-align: center; margin: 2rem; }
+  #recognized,#translated { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; min-height: 50px; margin: 1rem 0; }
+  button { padding: 0.7rem 1.2rem; font-size: 1rem; border: none; border-radius: 6px; cursor: pointer; background: #4CAF50; color: white; }
+  #status { margin-top: 0.5rem; font-weight: bold; }
+  #queue { margin-top: 2rem; text-align: left; max-height: 200px; overflow-y: auto; }
+  .queue-item { margin-bottom: 0.5rem; }
+</style>
 </head>
 <body>
-  <h1>🎤 Live Spanish → English Translator</h1>
-  <button id="toggleBtn">▶️ Start Recording</button>
+<h1>🎤 Live Spanish → English Translator</h1>
+<button id="toggleBtn">▶️ Start Recording</button>
 
-  <h3>Recognized Spanish:</h3>
-  <div id="recognized">...</div>
+<h3>Recognized Spanish:</h3>
+<div id="recognized">...</div>
 
-  <h3>Translated English:</h3>
-  <div id="translated">...</div>
+<h3>Translated English:</h3>
+<div id="translated">...</div>
 
-  <div id="status">Status: ready</div>
+<div id="status">Status: ready</div>
 
-  <h3>Translation Queue:</h3>
-  <div id="queue"></div>
+<h3>Translation Queue:</h3>
+<div id="queue"></div>
 
-  <script>
-    const toggleBtn = document.getElementById("toggleBtn");
-    const recognizedEl = document.getElementById("recognized");
-    const translatedEl = document.getElementById("translated");
-    const statusEl = document.getElementById("status");
-    const queueEl = document.getElementById("queue");
+<script>
+const toggleBtn = document.getElementById("toggleBtn");
+const recognizedEl = document.getElementById("recognized");
+const translatedEl = document.getElementById("translated");
+const statusEl = document.getElementById("status");
+const queueEl = document.getElementById("queue");
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("Your browser does not support SpeechRecognition. Use Chrome or Edge on desktop/Android.");
-    }
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SpeechRecognition) {
+  alert("Your browser does not support SpeechRecognition. Use Chrome or Edge on desktop/Android.");
+}
 
-    let recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = false;
-    recognition.lang = "es-ES";
+let recognition = new SpeechRecognition();
+recognition.continuous = true;
+recognition.interimResults = false;
+recognition.lang = "es-ES";
 
-    let recording = false;
-    let ttsQueue = [];
-    let ttsProcessing = false;
+let recording = false;
+let ttsQueue = [];
+let ttsProcessing = false;
 
-    async function processTTSQueue() {
-      if (ttsProcessing || ttsQueue.length === 0) return;
-      ttsProcessing = true;
+// Process TTS queue sequentially
+async function processTTSQueue() {
+  if (ttsProcessing || ttsQueue.length === 0) return;
+  ttsProcessing = true;
 
-      const phrase = ttsQueue.shift();
-      const utter = new SpeechSynthesisUtterance(phrase);
-      utter.lang = "en-US";
-      utter.onend = () => {
-        ttsProcessing = false;
+  const phrase = ttsQueue.shift();
+  const utter = new SpeechSynthesisUtterance(phrase);
+  utter.lang = "en-US";
+  utter.onend = () => {
+    ttsProcessing = false;
+    processTTSQueue();
+  };
+  speechSynthesis.speak(utter);
+}
+
+// Handle speech recognition results
+recognition.onresult = async (event) => {
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    if (event.results[i].isFinal) {
+      const phrase = event.results[i][0].transcript.trim();
+      if (!phrase) continue;
+
+      recognizedEl.textContent = phrase;
+      statusEl.textContent = "Status: translating...";
+
+      try {
+        const resp = await fetch("https://translate.argosopentech.com/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            q: phrase,
+            source: "es",
+            target: "en",
+            format: "text"
+          })
+        });
+
+        const data = await resp.json();
+        const translatedText = data.translatedText || "Translation failed";
+        translatedEl.textContent = translatedText;
+
+        // Add to visual queue
+        const queueItem = document.createElement("div");
+        queueItem.classList.add("queue-item");
+        queueItem.textContent = `${phrase} → ${translatedText}`;
+        queueEl.appendChild(queueItem);
+        queueEl.scrollTop = queueEl.scrollHeight;
+
+        // Add to TTS queue
+        ttsQueue.push(translatedText);
         processTTSQueue();
-      };
-      speechSynthesis.speak(utter);
-    }
 
-    recognition.onresult = async (event) => {
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          const phrase = event.results[i][0].transcript.trim();
-          if (!phrase) continue;
-
-          recognizedEl.textContent = phrase;
-          statusEl.textContent = "Status: translating...";
-
-          try {
-            const resp = await fetch("https://libretranslate.com/translate", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                q: phrase,
-                source: "es",
-                target: "en",
-                format: "text"
-              })
-            });
-
-            const data = await resp.json();
-            const translatedText = data.translatedText;
-            translatedEl.textContent = translatedText;
-
-            const queueItem = document.createElement("div");
-            queueItem.classList.add("queue-item");
-            queueItem.textContent = `${phrase} → ${translatedText}`;
-            queueEl.appendChild(queueItem);
-
-            ttsQueue.push(translatedText);
-            processTTSQueue();
-
-            statusEl.textContent = "Status: listening...";
-          } catch (err) {
-            translatedEl.textContent = "Translation error: " + err.message;
-            statusEl.textContent = "Status: error";
-          }
-        }
-      }
-    };
-
-    recognition.onerror = (e) => {
-      console.error(e);
-      statusEl.textContent = "Recognition error: " + e.error;
-    };
-
-    recognition.onend = () => {
-      if (recording) {
-        recognition.start();
-      }
-    };
-
-    toggleBtn.addEventListener("click", () => {
-      if (!recording) {
-        recognition.start();
-        recording = true;
-        toggleBtn.textContent = "⏹️ Stop Recording";
         statusEl.textContent = "Status: listening...";
-      } else {
-        recording = false;
-        recognition.stop();
-        toggleBtn.textContent = "▶️ Start Recording";
-        statusEl.textContent = "Status: stopped";
+      } catch (err) {
+        translatedEl.textContent = "Translation error: " + err.message;
+        statusEl.textContent = "Status: error";
       }
-    });
-  </script>
+    }
+  }
+};
+
+recognition.onerror = (e) => {
+  console.error(e);
+  statusEl.textContent = "Recognition error: " + e.error;
+};
+
+// Restart recognition automatically while recording
+recognition.onend = () => {
+  if (recording) {
+    recognition.start();
+  }
+};
+
+// Toggle button
+toggleBtn.addEventListener("click", () => {
+  if (!recording) {
+    recognition.start();
+    recording = true;
+    toggleBtn.textContent = "⏹️ Stop Recording";
+    statusEl.textContent = "Status: listening...";
+  } else {
+    recording = false;
+    recognition.stop();
+    toggleBtn.textContent = "▶️ Start Recording";
+    statusEl.textContent = "Status: stopped";
+  }
+});
+</script>
 </body>
 </html>
