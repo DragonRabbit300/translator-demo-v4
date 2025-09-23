@@ -1,195 +1,122 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Live Spanish → English Translator</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f7f6;
-            margin:0;padding:0;
-            display:flex;
-            flex-direction:column;
-            align-items:center;
-            min-height:100vh;
-        }
-        .container {
-            width:95%;
-            max-width:600px;
-            background:#fff;
-            border-radius:12px;
-            box-shadow:0 4px 12px rgba(0,0,0,0.12);
-            padding:20px;
-            margin-top:20px;
-        }
-        h1 { text-align:center; font-size:1.5rem; color:#333; }
-        button {
-            width:100%;
-            padding:18px;
-            font-size:1.2rem;
-            background:#4CAF50;
-            color:#fff;
-            border:none;
-            border-radius:8px;
-            cursor:pointer;
-        }
-        button:hover { background:#45a049; }
-        .output { margin:10px 0; padding:15px; background:#e9ecef; border-radius:8px; min-height:60px; font-size:1.1rem; word-wrap:break-word; }
-        .queue { margin-top:15px; max-height:300px; overflow-y:auto; padding:10px; background:#f8f9fa; border-radius:8px; }
-        .queue-item { margin-bottom:10px; padding:10px; background:#fff; border:1px solid #ddd; border-radius:8px; font-size:1rem; }
-        .status { font-weight:bold; margin-top:10px; color:#555; text-align:center; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🎤 Live Spanish → English Translator</h1>
-        <button id="toggleBtn">▶️ Start Recording</button>
-        <div id="recognized" class="output">Recognized Spanish will appear here...</div>
-        <div id="translated" class="output">Translated English will appear here...</div>
-        <div id="status" class="status">Status: Ready</div>
-        <h3>Translation Queue:</h3>
-        <div id="queue" class="queue"></div>
-    </div>
-
-    <script>
-        class TranslationService {
-            constructor() {
-                this.services = {
-                    libretranslate: {
-                        url: 'https://libretranslate.com/translate',
-                        params: (text) => ({
-                            q: text,
-                            source: 'es',
-                            target: 'en',
-                            format: 'text',
-                            api_key: ''  // No API key required
-                        }),
-                        parse: (data) => data.translatedText || "Translation failed"
-                    }
-                };
-                this.currentService = 'libretranslate';
-            }
-
-            async translate(text) {
-                try {
-                    const service = this.services[this.currentService];
-                    const response = await fetch(service.url, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'Accept': 'application/json'
-                        },
-                        body: new URLSearchParams(service.params(text))
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`Translation service unavailable: ${response.statusText}`);
-                    }
-
-                    const data = await response.json();
-                    return service.parse(data);
-                } catch (error) {
-                    console.error('Translation error:', error);
-                    throw error;
-                }
-            }
-        }
-
-        const translationService = new TranslationService();
-
-        const toggleBtn = document.getElementById("toggleBtn");
-        const recognizedEl = document.getElementById("recognized");
-        const translatedEl = document.getElementById("translated");
-        const statusEl = document.getElementById("status");
-        const queueEl = document.getElementById("queue");
-
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-            alert("Use Chrome or Edge for Speech Recognition.");
-        }
-
-        let recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = false;
-        recognition.lang = "es-ES";
-
-        let recording = false;
-        let ttsQueue = [];
-        let ttsProcessing = false;
-
-        async function processTTSQueue() {
-            if (ttsProcessing || ttsQueue.length === 0) return;
-            ttsProcessing = true;
-            
-            const phrase = ttsQueue.shift();
-            const utter = new SpeechSynthesisUtterance(phrase);
-            utter.lang = "en-US";
-            utter.onend = () => { ttsProcessing = false; processTTSQueue(); }
-            speechSynthesis.speak(utter);
-        }
-
-        async function translateText(text) {
-            try {
-                return await translationService.translate(text);
-            } catch (error) {
-                return "Translation service unavailable";
-            }
-        }
-
-        recognition.onresult = async (event) => {
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                if (event.results[i].isFinal) {
-                    const phrase = event.results[i][0].transcript.trim();
-                    if (!phrase) continue;
-
-                    recognizedEl.textContent = phrase;
-                    statusEl.textContent = "Status: Translating...";
-                    
-                    try {
-                        const translatedText = await translateText(phrase);
-                        translatedEl.textContent = translatedText;
-
-                        const queueItem = document.createElement("div");
-                        queueItem.classList.add("queue-item");
-                        queueItem.textContent = `${phrase} → ${translatedText}`;
-                        queueEl.appendChild(queueItem);
-                        queueEl.scrollTop = queueEl.scrollHeight;
-
-                        ttsQueue.push(translatedText);
-                        processTTSQueue();
-                    } catch (error) {
-                        translatedEl.textContent = "Translation failed";
-                        statusEl.textContent = "Status: Error occurred";
-                    }
-
-                    statusEl.textContent = "Status: Listening...";
-                }
+class TranslationService {
+    constructor() {
+        this.services = {
+            libretranslate: {
+                url: 'https://libretranslate.com/translate',
+                params: (text) => ({
+                    q: text,
+                    source: 'es',
+                    target: 'en',
+                    format: 'text',
+                    api_key: ''
+                }),
+                parse: (data) => data.translatedText || "Translation failed"
             }
         };
+        this.currentService = 'libretranslate';
+    }
 
-        recognition.onerror = (e) => {
-            console.error(e);
-            statusEl.textContent = "Recognition error: " + e.error;
-        }
+    async translate(text) {
+        try {
+            const service = this.services[this.currentService];
+            const response = await fetch(service.url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Accept': 'application/json'
+                },
+                body: new URLSearchParams(service.params(text))
+            });
 
-        recognition.onend = () => {
-            if (recording) recognition.start();
-        }
-
-        toggleBtn.addEventListener("click", () => {
-            if (!recording) {
-                recognition.start();
-                recording = true;
-                toggleBtn.textContent = "⏹️ Stop Recording";
-                statusEl.textContent = "Status: Listening...";
-            } else {
-                recognition.stop();
-                recording = false;
-                toggleBtn.textContent = "▶️ Start Recording";
-                statusEl.textContent = "Status: Stopped";
+            if (!response.ok) {
+                throw new Error(`Translation service unavailable: ${response.statusText}`);
             }
-        });
-    </script>
-</body>
-</html>
+
+            const data = await response.json();
+            return service.parse(data);
+        } catch (error) {
+            console.error('Translation error:', error);
+            throw error;
+        }
+    }
+}
+
+// Enhanced speech recognition initialization
+function initializeSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        alert("Speech recognition is not supported in your browser. Please use Chrome.");
+        return null;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = "es-ES";
+    recognition.maxResults = 10;
+
+    recognition.onstart = () => {
+        console.log('Speech recognition started');
+        statusEl.textContent = "Status: Listening...";
+    };
+
+    recognition.onerror = (error) => {
+        console.error('Speech recognition error:', error);
+        statusEl.textContent = `Recognition error: ${error.error || 'Unknown error'}`;
+    };
+
+    recognition.onend = () => {
+        console.log('Speech recognition ended');
+        if (recording) {
+            recognition.start();
+        }
+    };
+
+    return recognition;
+}
+
+// Enhanced translation function with detailed error handling
+async function translateText(text) {
+    try {
+        console.log('Attempting translation:', text);
+        const translatedText = await translationService.translate(text);
+        console.log('Translation successful:', translatedText);
+        return translatedText;
+    } catch (error) {
+        console.error('Translation failed:', error);
+        statusEl.textContent = "Status: Translation failed";
+        return "Translation service unavailable";
+    }
+}
+
+// Enhanced event handler with error recovery
+recognition.onresult = async (event) => {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+            const phrase = event.results[i][0].transcript.trim();
+            if (!phrase) continue;
+
+            recognizedEl.textContent = phrase;
+            statusEl.textContent = "Status: Translating...";
+            
+            try {
+                const translatedText = await translateText(phrase);
+                translatedEl.textContent = translatedText;
+
+                const queueItem = document.createElement("div");
+                queueItem.classList.add("queue-item");
+                queueItem.textContent = `${phrase} → ${translatedText}`;
+                queueEl.appendChild(queueItem);
+                queueEl.scrollTop = queueEl.scrollHeight;
+
+                ttsQueue.push(translatedText);
+                processTTSQueue();
+            } catch (error) {
+                translatedEl.textContent = "Translation failed";
+                statusEl.textContent = "Status: Error occurred";
+            }
+
+            statusEl.textContent = "Status: Listening...";
+        }
+    }
+};
