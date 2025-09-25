@@ -68,9 +68,10 @@
     let langPair = "es|en"; // default
     let sentenceBuffer = "";
     let breakTimer = null;
-    const BREAK_DELAY = 2000; // 2 seconds pause
+    let continuousTimer = null;
+    const BREAK_DELAY = 500; // 0.5 seconds pause
+    const MAX_SENTENCE_DURATION = 5000; // 5 seconds continuous talk
 
-    // Setup speech recognition
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
       recognition.lang = "es-ES";
@@ -98,7 +99,7 @@
 
       if (/[.!?]$/.test(trimmed) || force) {
         const completeSentence = trimmed;
-        sentenceBuffer = ""; // reset
+        sentenceBuffer = "";
 
         const phraseDiv = document.createElement("div");
         phraseDiv.className = "phrase";
@@ -107,17 +108,25 @@
 
         translateText(completeSentence).then(translated => {
           phraseDiv.querySelector(".trans").innerText = `➡️ ${translated}`;
-
           const utter = new SpeechSynthesisUtterance(translated);
           utter.lang = langPair.split("|")[1] === "en" ? "en-US" : "es-ES";
           speechSynthesis.speak(utter);
         });
+
+        // Reset timers
+        if (breakTimer) clearTimeout(breakTimer);
+        if (continuousTimer) clearTimeout(continuousTimer);
       }
     }
 
     function resetBreakTimer() {
       if (breakTimer) clearTimeout(breakTimer);
       breakTimer = setTimeout(() => commitSentence(true), BREAK_DELAY);
+    }
+
+    function resetContinuousTimer() {
+      if (continuousTimer) clearTimeout(continuousTimer);
+      continuousTimer = setTimeout(() => commitSentence(true), MAX_SENTENCE_DURATION);
     }
 
     recognition.onresult = (event) => {
@@ -129,6 +138,7 @@
         if (event.results[i].isFinal) {
           sentenceBuffer += " " + transcript.trim();
           resetBreakTimer();
+          resetContinuousTimer();
           if (/[.!?]$/.test(sentenceBuffer.trim())) {
             commitSentence();
           }
@@ -157,6 +167,7 @@
         liveText.textContent = "";
         sentenceBuffer = "";
         if (breakTimer) clearTimeout(breakTimer);
+        if (continuousTimer) clearTimeout(continuousTimer);
       }
     });
   </script>
