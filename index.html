@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Live Voice Translator</title>
+  <title>Sentence-Based Voice Translator</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -10,13 +10,8 @@
       margin: 0;
       padding: 20px;
     }
-    h1 {
-      text-align: center;
-    }
-    .controls {
-      text-align: center;
-      margin: 20px 0;
-    }
+    h1 { text-align: center; }
+    .controls { text-align: center; margin: 20px 0; }
     select, button {
       padding: 10px 15px;
       font-size: 16px;
@@ -25,14 +20,8 @@
       border-radius: 8px;
       border: none;
     }
-    button {
-      background: #007bff;
-      color: white;
-    }
-    button:disabled {
-      background: #ccc;
-      cursor: not-allowed;
-    }
+    button { background: #007bff; color: white; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
     .log {
       max-width: 650px;
       margin: 20px auto;
@@ -51,17 +40,12 @@
       padding: 10px;
       border-bottom: 1px solid #eee;
     }
-    .src {
-      font-weight: bold;
-      color: #333;
-    }
-    .trans {
-      color: #007bff;
-    }
+    .src { font-weight: bold; color: #333; }
+    .trans { color: #007bff; }
   </style>
 </head>
 <body>
-  <h1>Live Voice Translator</h1>
+  <h1>Sentence-Based Voice Translator</h1>
   <div class="controls">
     <select id="direction">
       <option value="es|en">Spanish → English</option>
@@ -82,11 +66,12 @@
     let recognition;
     let recording = false;
     let langPair = "es|en"; // default
+    let sentenceBuffer = "";
 
-    // Setup speech recognition (Web Speech API)
+    // Speech recognition setup
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
-      recognition.lang = "es-ES"; // default input language
+      recognition.lang = "es-ES";
       recognition.continuous = true;
       recognition.interimResults = true;
     } else {
@@ -107,29 +92,36 @@
 
     recognition.onresult = async (event) => {
       let interim = "";
-      let final = "";
 
       for (let i = event.resultIndex; i < event.results.length; ++i) {
         const transcript = event.results[i][0].transcript;
+
         if (event.results[i].isFinal) {
-          final += transcript.trim();
-          const phraseDiv = document.createElement("div");
-          phraseDiv.className = "phrase";
-          phraseDiv.innerHTML = `<div class="src">🎙 ${final}</div><div class="trans">Translating...</div>`;
-          log.prepend(phraseDiv);
+          sentenceBuffer += " " + transcript.trim();
 
-          const translated = await translateText(final);
-          phraseDiv.querySelector(".trans").innerText = `➡️ ${translated}`;
+          // Check if buffer ends with sentence punctuation
+          if (/[.!?]$/.test(sentenceBuffer.trim())) {
+            const completeSentence = sentenceBuffer.trim();
+            sentenceBuffer = ""; // reset buffer
 
-          // Speak translation
-          const utter = new SpeechSynthesisUtterance(translated);
-          utter.lang = langPair.split("|")[1] === "en" ? "en-US" : "es-ES";
-          speechSynthesis.speak(utter);
+            const phraseDiv = document.createElement("div");
+            phraseDiv.className = "phrase";
+            phraseDiv.innerHTML = `<div class="src">🎙 ${completeSentence}</div><div class="trans">Translating...</div>`;
+            log.prepend(phraseDiv);
+
+            const translated = await translateText(completeSentence);
+            phraseDiv.querySelector(".trans").innerText = `➡️ ${translated}`;
+
+            const utter = new SpeechSynthesisUtterance(translated);
+            utter.lang = langPair.split("|")[1] === "en" ? "en-US" : "es-ES";
+            speechSynthesis.speak(utter);
+          }
         } else {
           interim += transcript;
         }
       }
-      liveText.textContent = interim ? `📝 ${interim}` : "";
+
+      liveText.textContent = interim ? `📝 ${sentenceBuffer} ${interim}` : sentenceBuffer;
     };
 
     directionSelect.addEventListener("change", () => {
@@ -147,6 +139,7 @@
         button.textContent = "🎤 Start Recording";
         recording = false;
         liveText.textContent = "";
+        sentenceBuffer = "";
       }
     });
   </script>
