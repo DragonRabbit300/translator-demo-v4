@@ -60,6 +60,7 @@
       <option value="en|es">English → Spanish</option>
     </select>
     <button id="toggleRec">🎤 Start</button>
+    <button id="enableAudio">🔊 Enable Audio</button>
   </div>
   <div class="log" id="log">
     <div id="liveText" class="live"></div>
@@ -67,6 +68,7 @@
 
   <script>
     const button = document.getElementById("toggleRec");
+    const enableAudioBtn = document.getElementById("enableAudio");
     const log = document.getElementById("log");
     const liveText = document.getElementById("liveText");
     const directionSelect = document.getElementById("direction");
@@ -77,9 +79,10 @@
     let sentenceBuffer = "";
     let pauseTimer = null;
     let maxSpeakTimer = null;
+    let audioUnlocked = false; // flag to unlock audio
 
-    const MAX_SPEAK_DURATION = 2000; // 2s continuous
-    const PAUSE_DELAY = 250; // 0.25s pause
+    const MAX_SPEAK_DURATION = 2000; // 2s
+    const PAUSE_DELAY = 250; // 0.25s
 
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
@@ -102,6 +105,13 @@
       }
     }
 
+    function speakText(text) {
+      if(!audioUnlocked) return; // do nothing if audio not unlocked
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = langPair.split("|")[1] === "en" ? "en-US" : "es-ES";
+      speechSynthesis.speak(utter);
+    }
+
     function commitSentence(force=false){
       const trimmed = sentenceBuffer.trim();
       if(!trimmed) return;
@@ -116,9 +126,7 @@
 
         translateText(sentence).then(translated => {
           phraseDiv.querySelector(".trans").innerText = `➡️ ${translated}`;
-          const utter = new SpeechSynthesisUtterance(translated);
-          utter.lang = langPair.split("|")[1] === "en" ? "en-US" : "es-ES";
-          speechSynthesis.speak(utter);
+          speakText(translated);
         });
 
         if(pauseTimer) clearTimeout(pauseTimer);
@@ -138,7 +146,7 @@
 
     recognition.onresult = (event) => {
       let interim = "";
-      for(let i = event.resultIndex;i<event.results.length;i++){
+      for(let i=event.resultIndex;i<event.results.length;i++){
         const transcript = event.results[i][0].transcript;
         if(event.results[i].isFinal){
           sentenceBuffer += " " + transcript.trim();
@@ -149,7 +157,6 @@
           }
         } else {
           interim += transcript;
-          // reset timers on ongoing speech
           resetMaxSpeakTimer();
         }
       }
@@ -175,6 +182,13 @@
         if(pauseTimer) clearTimeout(pauseTimer);
         if(maxSpeakTimer) clearTimeout(maxSpeakTimer);
       }
+    });
+
+    // Unlock audio for mobile
+    enableAudioBtn.addEventListener("click", ()=>{
+      audioUnlocked = true;
+      speakText("Audio Enabled");
+      enableAudioBtn.style.display = "none"; // hide button after use
     });
   </script>
 </body>
