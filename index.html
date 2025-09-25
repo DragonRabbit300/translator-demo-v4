@@ -79,10 +79,10 @@
     let sentenceBuffer = "";
     let pauseTimer = null;
     let maxSpeakTimer = null;
-    let audioUnlocked = false; // flag to unlock audio
+    let audioUnlocked = false;
 
-    const MAX_SPEAK_DURATION = 2000; // 2s
-    const PAUSE_DELAY = 250; // 0.25s
+    const MAX_SPEAK_DURATION = 2000; // 2s max continuous speech
+    const PAUSE_DELAY = 100; // 0.1s pause
 
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
@@ -106,9 +106,17 @@
     }
 
     function speakText(text) {
-      if(!audioUnlocked) return; // do nothing if audio not unlocked
+      if(!audioUnlocked) return;
       const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = langPair.split("|")[1] === "en" ? "en-US" : "es-ES";
+      const voices = speechSynthesis.getVoices();
+      if(langPair.split("|")[1] === "en") {
+        utter.voice = voices.find(v => v.lang.startsWith("en")) || voices[0];
+      } else {
+        utter.voice = voices.find(v => v.lang.startsWith("es")) || voices[0];
+      }
+      utter.rate = 1;
+      utter.pitch = 1;
+      utter.volume = 1;
       speechSynthesis.speak(utter);
     }
 
@@ -157,7 +165,8 @@
           }
         } else {
           interim += transcript;
-          resetMaxSpeakTimer();
+          resetMaxSpeakTimer(); // keep max speak timer running
+          resetPauseTimer();   // also reset pause timer for ongoing speech
         }
       }
       liveText.textContent = interim ? `📝 ${sentenceBuffer} ${interim}` : sentenceBuffer;
@@ -184,11 +193,10 @@
       }
     });
 
-    // Unlock audio for mobile
     enableAudioBtn.addEventListener("click", ()=>{
       audioUnlocked = true;
       speakText("Audio Enabled");
-      enableAudioBtn.style.display = "none"; // hide button after use
+      enableAudioBtn.style.display = "none"; 
     });
   </script>
 </body>
