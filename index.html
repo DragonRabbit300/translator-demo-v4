@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Spanish → English Voice Translator</title>
+  <title>Live Voice Translator</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -17,13 +17,15 @@
       text-align: center;
       margin: 20px 0;
     }
-    button {
-      padding: 10px 20px;
+    select, button {
+      padding: 10px 15px;
       font-size: 16px;
       margin: 5px;
       cursor: pointer;
       border-radius: 8px;
       border: none;
+    }
+    button {
       background: #007bff;
       color: white;
     }
@@ -32,12 +34,17 @@
       cursor: not-allowed;
     }
     .log {
-      max-width: 600px;
+      max-width: 650px;
       margin: 20px auto;
       background: white;
       border-radius: 10px;
       padding: 15px;
       box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    .live {
+      font-style: italic;
+      color: #555;
+      margin-bottom: 15px;
     }
     .phrase {
       margin-bottom: 10px;
@@ -54,34 +61,42 @@
   </style>
 </head>
 <body>
-  <h1>Spanish → English Voice Translator</h1>
+  <h1>Live Voice Translator</h1>
   <div class="controls">
+    <select id="direction">
+      <option value="es|en">Spanish → English</option>
+      <option value="en|es">English → Spanish</option>
+    </select>
     <button id="toggleRec">🎤 Start Recording</button>
   </div>
-  <div class="log" id="log"></div>
+  <div class="log" id="log">
+    <div id="liveText" class="live"></div>
+  </div>
 
   <script>
     const button = document.getElementById("toggleRec");
     const log = document.getElementById("log");
+    const liveText = document.getElementById("liveText");
+    const directionSelect = document.getElementById("direction");
 
     let recognition;
     let recording = false;
+    let langPair = "es|en"; // default
 
     // Setup speech recognition (Web Speech API)
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
-      recognition.lang = "es-ES"; // Spanish input
+      recognition.lang = "es-ES"; // default input language
       recognition.continuous = true;
-      recognition.interimResults = false;
+      recognition.interimResults = true;
     } else {
       alert("Your browser does not support speech recognition.");
     }
 
     async function translateText(text) {
       try {
-        // Using MyMemory API (Spanish -> English)
         const res = await fetch(
-          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=es|en`
+          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}`
         );
         const data = await res.json();
         return data.responseData.translatedText || "[No translation]";
@@ -91,22 +106,36 @@
     }
 
     recognition.onresult = async (event) => {
-      const transcript = event.results[event.results.length - 1][0].transcript.trim();
-      if (!transcript) return;
+      let interim = "";
+      let final = "";
 
-      const phraseDiv = document.createElement("div");
-      phraseDiv.className = "phrase";
-      phraseDiv.innerHTML = `<div class="src">🎙 ${transcript}</div><div class="trans">Translating...</div>`;
-      log.prepend(phraseDiv);
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          final += transcript.trim();
+          const phraseDiv = document.createElement("div");
+          phraseDiv.className = "phrase";
+          phraseDiv.innerHTML = `<div class="src">🎙 ${final}</div><div class="trans">Translating...</div>`;
+          log.prepend(phraseDiv);
 
-      const translated = await translateText(transcript);
-      phraseDiv.querySelector(".trans").innerText = `➡️ ${translated}`;
+          const translated = await translateText(final);
+          phraseDiv.querySelector(".trans").innerText = `➡️ ${translated}`;
 
-      // Play translation with text-to-speech
-      const utter = new SpeechSynthesisUtterance(translated);
-      utter.lang = "en-US";
-      speechSynthesis.speak(utter);
+          // Speak translation
+          const utter = new SpeechSynthesisUtterance(translated);
+          utter.lang = langPair.split("|")[1] === "en" ? "en-US" : "es-ES";
+          speechSynthesis.speak(utter);
+        } else {
+          interim += transcript;
+        }
+      }
+      liveText.textContent = interim ? `📝 ${interim}` : "";
     };
+
+    directionSelect.addEventListener("change", () => {
+      langPair = directionSelect.value;
+      recognition.lang = langPair.startsWith("es") ? "es-ES" : "en-US";
+    });
 
     button.addEventListener("click", () => {
       if (!recording) {
@@ -117,6 +146,7 @@
         recognition.stop();
         button.textContent = "🎤 Start Recording";
         recording = false;
+        liveText.textContent = "";
       }
     });
   </script>
