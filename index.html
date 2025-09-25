@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Sentence-Based Voice Translator</title>
+  <title>Smart Sentence Voice Translator</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -45,7 +45,7 @@
   </style>
 </head>
 <body>
-  <h1>Sentence-Based Voice Translator</h1>
+  <h1>Smart Sentence Voice Translator</h1>
   <div class="controls">
     <select id="direction">
       <option value="es|en">Spanish → English</option>
@@ -67,8 +67,10 @@
     let recording = false;
     let langPair = "es|en"; // default
     let sentenceBuffer = "";
+    let breakTimer = null;
+    const BREAK_DELAY = 2000; // 2 seconds pause
 
-    // Speech recognition setup
+    // Setup speech recognition
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
       recognition.lang = "es-ES";
@@ -90,7 +92,35 @@
       }
     }
 
-    recognition.onresult = async (event) => {
+    function commitSentence(force = false) {
+      const trimmed = sentenceBuffer.trim();
+      if (!trimmed) return;
+
+      if (/[.!?]$/.test(trimmed) || force) {
+        const completeSentence = trimmed;
+        sentenceBuffer = ""; // reset
+
+        const phraseDiv = document.createElement("div");
+        phraseDiv.className = "phrase";
+        phraseDiv.innerHTML = `<div class="src">🎙 ${completeSentence}</div><div class="trans">Translating...</div>`;
+        log.prepend(phraseDiv);
+
+        translateText(completeSentence).then(translated => {
+          phraseDiv.querySelector(".trans").innerText = `➡️ ${translated}`;
+
+          const utter = new SpeechSynthesisUtterance(translated);
+          utter.lang = langPair.split("|")[1] === "en" ? "en-US" : "es-ES";
+          speechSynthesis.speak(utter);
+        });
+      }
+    }
+
+    function resetBreakTimer() {
+      if (breakTimer) clearTimeout(breakTimer);
+      breakTimer = setTimeout(() => commitSentence(true), BREAK_DELAY);
+    }
+
+    recognition.onresult = (event) => {
       let interim = "";
 
       for (let i = event.resultIndex; i < event.results.length; ++i) {
@@ -98,23 +128,9 @@
 
         if (event.results[i].isFinal) {
           sentenceBuffer += " " + transcript.trim();
-
-          // Check if buffer ends with sentence punctuation
+          resetBreakTimer();
           if (/[.!?]$/.test(sentenceBuffer.trim())) {
-            const completeSentence = sentenceBuffer.trim();
-            sentenceBuffer = ""; // reset buffer
-
-            const phraseDiv = document.createElement("div");
-            phraseDiv.className = "phrase";
-            phraseDiv.innerHTML = `<div class="src">🎙 ${completeSentence}</div><div class="trans">Translating...</div>`;
-            log.prepend(phraseDiv);
-
-            const translated = await translateText(completeSentence);
-            phraseDiv.querySelector(".trans").innerText = `➡️ ${translated}`;
-
-            const utter = new SpeechSynthesisUtterance(translated);
-            utter.lang = langPair.split("|")[1] === "en" ? "en-US" : "es-ES";
-            speechSynthesis.speak(utter);
+            commitSentence();
           }
         } else {
           interim += transcript;
@@ -140,6 +156,7 @@
         recording = false;
         liveText.textContent = "";
         sentenceBuffer = "";
+        if (breakTimer) clearTimeout(breakTimer);
       }
     });
   </script>
