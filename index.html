@@ -65,12 +65,13 @@
 
     let recognition;
     let recording = false;
-    let langPair = "es|en"; // default
+    let langPair = "es|en";
     let sentenceBuffer = "";
-    let breakTimer = null;
-    let continuousTimer = null;
-    const BREAK_DELAY = 500; // 0.5 seconds pause
-    const MAX_SENTENCE_DURATION = 5000; // 5 seconds continuous talk
+    let pauseTimer = null;
+    let maxSpeakTimer = null;
+
+    const MAX_SPEAK_DURATION = 2000; // 2 seconds of continuous talking
+    const PAUSE_DELAY = 250; // 0.25 second pause
 
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
@@ -114,19 +115,19 @@
         });
 
         // Reset timers
-        if (breakTimer) clearTimeout(breakTimer);
-        if (continuousTimer) clearTimeout(continuousTimer);
+        if (pauseTimer) clearTimeout(pauseTimer);
+        if (maxSpeakTimer) clearTimeout(maxSpeakTimer);
       }
     }
 
-    function resetBreakTimer() {
-      if (breakTimer) clearTimeout(breakTimer);
-      breakTimer = setTimeout(() => commitSentence(true), BREAK_DELAY);
+    function resetPauseTimer() {
+      if (pauseTimer) clearTimeout(pauseTimer);
+      pauseTimer = setTimeout(() => commitSentence(true), PAUSE_DELAY);
     }
 
-    function resetContinuousTimer() {
-      if (continuousTimer) clearTimeout(continuousTimer);
-      continuousTimer = setTimeout(() => commitSentence(true), MAX_SENTENCE_DURATION);
+    function resetMaxSpeakTimer() {
+      if (maxSpeakTimer) clearTimeout(maxSpeakTimer);
+      maxSpeakTimer = setTimeout(() => commitSentence(true), MAX_SPEAK_DURATION);
     }
 
     recognition.onresult = (event) => {
@@ -137,8 +138,8 @@
 
         if (event.results[i].isFinal) {
           sentenceBuffer += " " + transcript.trim();
-          resetBreakTimer();
-          resetContinuousTimer();
+          resetPauseTimer();
+          resetMaxSpeakTimer();
           if (/[.!?]$/.test(sentenceBuffer.trim())) {
             commitSentence();
           }
@@ -166,8 +167,8 @@
         recording = false;
         liveText.textContent = "";
         sentenceBuffer = "";
-        if (breakTimer) clearTimeout(breakTimer);
-        if (continuousTimer) clearTimeout(continuousTimer);
+        if (pauseTimer) clearTimeout(pauseTimer);
+        if (maxSpeakTimer) clearTimeout(maxSpeakTimer);
       }
     });
   </script>
