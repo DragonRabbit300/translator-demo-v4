@@ -1,194 +1,174 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Realtime Translator</title>
+  <title>Real-Time Translator</title>
   <style>
-    body { font-family: Arial, sans-serif; margin:0; padding:15px; background:#f4f4f9;}
-    h1 { text-align:center; font-size:1.5em; margin-bottom:10px; }
-    .controls { text-align:center; margin:15px 0; display:flex; justify-content:center; flex-wrap:wrap; gap:10px; }
-    select, button { padding:12px 18px; font-size:16px; border-radius:10px; border:none; cursor:pointer; }
-    button { background:#007bff; color:white; flex:1 1 150px; }
-    select { flex:1 1 150px; }
-    .log { max-width:600px; margin:0 auto; background:white; border-radius:10px; padding:15px; box-shadow:0 2px 5px rgba(0,0,0,0.2);}
-    .live { font-style:italic; color:#555; font-size:16px; margin-bottom:10px; }
-    .phrase { margin-bottom:10px; padding:10px; border-bottom:1px solid #eee; }
-    .src { font-weight:bold; color:#333; }
-    .trans { color:#007bff; margin-top:5px; }
-
-    /* Mic indicator */
-    .mic-indicator {
-      width: 30px; height: 30px;
-      border-radius: 50%;
-      margin: 0 auto;
-      background: red;
-      animation: pulse 1s infinite;
-      display: none;
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding: 20px;
     }
-    @keyframes pulse {
-      0% { transform: scale(1); opacity: 1; }
-      50% { transform: scale(1.4); opacity: 0.6; }
-      100% { transform: scale(1); opacity: 1; }
+    button {
+      padding: 12px 20px;
+      margin: 10px;
+      font-size: 16px;
+      border-radius: 10px;
+      border: none;
+      background: #007BFF;
+      color: white;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: gray;
+      cursor: not-allowed;
+    }
+    #translations {
+      margin-top: 20px;
+      text-align: left;
+      max-width: 500px;
+      margin-left: auto;
+      margin-right: auto;
+      background: #f8f8f8;
+      padding: 15px;
+      border-radius: 10px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
   </style>
 </head>
 <body>
-<h1>Realtime Voice Translator</h1>
+  <h1>Real-Time Translator 🌍</h1>
+  <p>Select direction and press Start to record:</p>
 
-<div class="controls">
   <select id="direction">
     <option value="es|en">Spanish → English</option>
     <option value="en|es">English → Spanish</option>
     <option value="sv|en">Swedish → English</option>
     <option value="en|sv">English → Swedish</option>
+    <option value="fr|en">French → English</option>
+    <option value="en|fr">English → French</option>
+    <option value="fr|es">French → Spanish</option>
+    <option value="es|fr">Spanish → French</option>
   </select>
-  <button id="toggleRec">🎤 Start</button>
-  <button id="enableAudio">🔊 Enable Audio</button>
-</div>
 
-<div class="mic-indicator" id="micIndicator"></div>
+  <br><br>
+  <button id="startBtn">▶ Start</button>
+  <button id="stopBtn" disabled>⏹ Stop</button>
 
-<div class="log" id="log">
-  <div id="liveText" class="live"></div>
-</div>
+  <div id="translations"></div>
 
-<script>
-const button = document.getElementById("toggleRec");
-const enableAudioBtn = document.getElementById("enableAudio");
-const micIndicator = document.getElementById("micIndicator");
-const log = document.getElementById("log");
-const liveText = document.getElementById("liveText");
-const directionSelect = document.getElementById("direction");
+  <script>
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const translationsDiv = document.getElementById("translations");
+    const direction = document.getElementById("direction");
 
-let recognition;
-let recording = false;
-let langPair = "es|en";
-let sentenceBuffer = "";
-let chunkTimer = null;
-let pauseTimer = null;
-let audioUnlocked = false;
+    const langMap = {
+      "es": "es-ES", // Spanish
+      "en": "en-US", // English
+      "sv": "sv-SE", // Swedish
+      "fr": "fr-FR"  // French
+    };
 
-const MAX_CHUNK_MS = 2000; // max 2s talking
-const PAUSE_DELAY = 250;   // 0.25s pause ends chunk
+    let recognition;
+    let isRecording = false;
+    let currentTranscript = "";
+    let lastSpeechTime = 0;
+    let speakingStart = 0;
 
-const langMap = {
-  "es": "es-ES",
-  "en": "en-US",
-  "sv": "sv-SE"
-};
+    if ("webkitSpeechRecognition" in window) {
+      recognition = new webkitSpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
 
-// ✅ Translation API (MyMemory free demo)
-async function translateText(text){
-  try {
-    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}`);
-    const data = await res.json();
-    return data.responseData.translatedText || "[No translation]";
-  } catch(e){ return "[Translation Error]"; }
-}
+      recognition.onresult = (event) => {
+        let interimTranscript = "";
+        let finalTranscript = "";
+        let now = Date.now();
 
-// ✅ Speak translation
-function speakText(text){
-  if(!audioUnlocked) return;
-  const utter = new SpeechSynthesisUtterance(text);
-  const voices = speechSynthesis.getVoices();
-  const targetLang = langPair.split("|")[1];
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          let transcript = event.results[i][0].transcript.trim();
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + " ";
+            speakingStart = 0;
+          } else {
+            interimTranscript += transcript + " ";
+            if (!speakingStart) speakingStart = now;
+            lastSpeechTime = now;
+          }
+        }
 
-  utter.voice = voices.find(v => v.lang.startsWith(targetLang)) || voices[0];
-  utter.rate = 1; utter.pitch = 1; utter.volume = 1;
-  speechSynthesis.speak(utter);
-}
+        if (finalTranscript) {
+          processChunk(finalTranscript);
+        } else if (interimTranscript) {
+          // Check if 2 seconds of speaking passed
+          if (now - speakingStart > 2000) {
+            processChunk(interimTranscript);
+            speakingStart = now;
+          }
+        }
 
-// ✅ Commit sentence
-function commitSentence(force=false){
-  const trimmed = sentenceBuffer.trim();
-  if(!trimmed) return;
-  if(/[.!?]$/.test(trimmed) || force){
-    const sentence = trimmed;
-    sentenceBuffer = "";
-    const phraseDiv = document.createElement("div");
-    phraseDiv.className="phrase";
-    phraseDiv.innerHTML = `<div class="src">🎙 ${sentence}</div><div class="trans">Translating...</div>`;
-    log.prepend(phraseDiv);
+        // Check if pause longer than 0.25s
+        if (lastSpeechTime && now - lastSpeechTime > 250 && currentTranscript) {
+          processChunk(currentTranscript);
+          currentTranscript = "";
+          lastSpeechTime = 0;
+          speakingStart = 0;
+        }
+      };
+    } else {
+      alert("Speech Recognition not supported in this browser.");
+    }
 
-    translateText(sentence).then(translated=>{
-      phraseDiv.querySelector(".trans").innerText=`➡️ ${translated}`;
-      speakText(translated);
+    function processChunk(transcript) {
+      transcript = transcript.trim();
+      if (!transcript) return;
+
+      currentTranscript = "";
+      const [from, to] = direction.value.split("|");
+
+      fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(transcript)}&langpair=${from}|${to}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.responseData) {
+            const translated = data.responseData.translatedText;
+            translationsDiv.innerHTML += `<p><strong>${transcript}</strong> → ${translated}</p>`;
+            speak(translated, langMap[to]);
+          }
+        })
+        .catch(() => {
+          translationsDiv.innerHTML += `<p><strong>${transcript}</strong> → (translation failed)</p>`;
+        });
+    }
+
+    function speak(text, langCode) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      const voices = speechSynthesis.getVoices();
+      const match = voices.find(v => v.lang.startsWith(langCode));
+      if (match) utterance.voice = match;
+      utterance.lang = langCode;
+      speechSynthesis.speak(utterance);
+    }
+
+    startBtn.addEventListener("click", () => {
+      const from = direction.value.split("|")[0];
+      recognition.lang = langMap[from];
+      recognition.start();
+      isRecording = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
     });
 
-    if(chunkTimer) clearTimeout(chunkTimer);
-    if(pauseTimer) clearTimeout(pauseTimer);
-  }
-}
+    stopBtn.addEventListener("click", () => {
+      recognition.stop();
+      isRecording = false;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    });
 
-// ✅ Reset timers
-function resetChunkTimer(){
-  if(chunkTimer) clearTimeout(chunkTimer);
-  chunkTimer = setTimeout(()=> commitSentence(true), MAX_CHUNK_MS);
-}
-function resetPauseTimer(){
-  if(pauseTimer) clearTimeout(pauseTimer);
-  pauseTimer = setTimeout(()=> commitSentence(true), PAUSE_DELAY);
-}
-
-// ✅ Speech recognition setup
-if ("webkitSpeechRecognition" in window) {
-  recognition = new webkitSpeechRecognition();
-  recognition.lang = langMap["es"];
-  recognition.continuous = true;
-  recognition.interimResults = true;
-
-  recognition.onresult = (event)=>{
-    let interim="";
-    for(let i=event.resultIndex;i<event.results.length;i++){
-      const transcript = event.results[i][0].transcript;
-      if(event.results[i].isFinal){
-        sentenceBuffer += " "+transcript.trim();
-        commitSentence();
-      } else {
-        interim += transcript;
-        resetChunkTimer();
-        resetPauseTimer();
-      }
-    }
-    liveText.textContent = interim ? `📝 ${sentenceBuffer} ${interim}` : sentenceBuffer;
-  };
-} else {
-  alert("Your browser does not support speech recognition.");
-}
-
-// ✅ Switch translation direction
-directionSelect.addEventListener("change", ()=>{
-  langPair = directionSelect.value;
-  const srcLang = langPair.split("|")[0];
-  recognition.lang = langMap[srcLang];
-});
-
-// ✅ Start/stop recording
-button.addEventListener("click", ()=>{
-  if(!recording){
-    recognition.start();
-    micIndicator.style.display="block";
-    button.textContent="⏹ Stop";
-    recording=true;
-  } else{
-    recognition.stop();
-    micIndicator.style.display="none";
-    button.textContent="🎤 Start";
-    recording=false;
-    liveText.textContent="";
-    sentenceBuffer="";
-    if(chunkTimer) clearTimeout(chunkTimer);
-    if(pauseTimer) clearTimeout(pauseTimer);
-  }
-});
-
-// ✅ Unlock audio (needed for mobile)
-enableAudioBtn.addEventListener("click", ()=>{
-  audioUnlocked=true;
-  speakText("Audio enabled");
-  enableAudioBtn.style.display="none";
-});
-</script>
+    // Load voices (fix Chrome bug)
+    window.speechSynthesis.onvoiceschanged = () => {};
+  </script>
 </body>
 </html>
