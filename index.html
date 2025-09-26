@@ -3,201 +3,164 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mobile Voice Translator</title>
+  <title>Realtime Translator</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 10px;
-      background: #f4f4f9;
-    }
-    h1 { text-align: center; font-size: 1.5em; }
-    .controls {
-      text-align: center;
-      margin: 15px 0;
-      display: flex;
-      justify-content: center;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-    select, button {
-      padding: 15px 20px;
-      font-size: 18px;
-      border-radius: 10px;
-      border: none;
-      cursor: pointer;
-    }
-    button { background: #007bff; color: white; flex: 1 1 150px; }
-    select { flex: 1 1 150px; }
-    .log {
-      max-width: 600px;
-      margin: 0 auto;
-      background: white;
-      border-radius: 10px;
-      padding: 15px;
-      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
-    }
-    .live {
-      font-style: italic;
-      color: #555;
-      font-size: 16px;
-      margin-bottom: 10px;
-    }
-    .phrase {
-      margin-bottom: 10px;
-      padding: 10px;
-      border-bottom: 1px solid #eee;
-    }
-    .src { font-weight: bold; color: #333; }
-    .trans { color: #007bff; margin-top: 5px; }
+    body { font-family: Arial, sans-serif; margin:0; padding:15px; background:#f4f4f9;}
+    h1 { text-align:center; font-size:1.5em; margin-bottom:10px; }
+    .controls { text-align:center; margin:15px 0; display:flex; justify-content:center; flex-wrap:wrap; gap:10px; }
+    select, button { padding:12px 18px; font-size:16px; border-radius:10px; border:none; cursor:pointer; }
+    button { background:#007bff; color:white; flex:1 1 150px; }
+    select { flex:1 1 150px; }
+    .log { max-width:600px; margin:0 auto; background:white; border-radius:10px; padding:15px; box-shadow:0 2px 5px rgba(0,0,0,0.2);}
+    .live { font-style:italic; color:#555; font-size:16px; margin-bottom:10px; }
+    .phrase { margin-bottom:10px; padding:10px; border-bottom:1px solid #eee; }
+    .src { font-weight:bold; color:#333; }
+    .trans { color:#007bff; margin-top:5px; }
   </style>
 </head>
 <body>
-  <h1>Mobile Voice Translator</h1>
-  <div class="controls">
-    <select id="direction">
-      <option value="es|en">Spanish → English</option>
-      <option value="en|es">English → Spanish</option>
-    </select>
-    <button id="toggleRec">🎤 Start</button>
-    <button id="enableAudio">🔊 Enable Audio</button>
-  </div>
-  <div class="log" id="log">
-    <div id="liveText" class="live"></div>
-  </div>
+<h1>Realtime Voice Translator</h1>
 
-  <script>
-    const button = document.getElementById("toggleRec");
-    const enableAudioBtn = document.getElementById("enableAudio");
-    const log = document.getElementById("log");
-    const liveText = document.getElementById("liveText");
-    const directionSelect = document.getElementById("direction");
+<div class="controls">
+  <select id="direction">
+    <option value="es|en">Spanish → English</option>
+    <option value="en|es">English → Spanish</option>
+    <option value="sv|en">Swedish → English</option>
+    <option value="en|sv">English → Swedish</option>
+  </select>
+  <button id="toggleRec">🎤 Start</button>
+  <button id="enableAudio">🔊 Enable Audio</button>
+</div>
 
-    let recognition;
-    let recording = false;
-    let langPair = "es|en";
-    let sentenceBuffer = "";
-    let pauseTimer = null;
-    let maxSpeakTimer = null;
-    let audioUnlocked = false;
+<div class="log" id="log">
+  <div id="liveText" class="live"></div>
+</div>
 
-    const MAX_SPEAK_DURATION = 2000; // 2s max continuous speech
-    const PAUSE_DELAY = 100; // 0.1s pause
+<script>
+const button = document.getElementById("toggleRec");
+const enableAudioBtn = document.getElementById("enableAudio");
+const log = document.getElementById("log");
+const liveText = document.getElementById("liveText");
+const directionSelect = document.getElementById("direction");
 
-    if ("webkitSpeechRecognition" in window) {
-      recognition = new webkitSpeechRecognition();
-      recognition.lang = "es-ES";
-      recognition.continuous = true;
-      recognition.interimResults = true;
-    } else {
-      alert("Your browser does not support speech recognition.");
-    }
+let recognition;
+let recording = false;
+let langPair = "es|en";
+let sentenceBuffer = "";
+let chunkTimer = null;
+let audioUnlocked = false;
 
-    async function translateText(text) {
-      try {
-        const res = await fetch(
-          `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}`
-        );
-        const data = await res.json();
-        return data.responseData.translatedText || "[No translation]";
-      } catch (e) {
-        return "[Translation Error]";
-      }
-    }
+const MAX_CHUNK_MS = 2000; // force break after 2s of continuous speech
 
-    function speakText(text) {
-      if(!audioUnlocked) return;
-      const utter = new SpeechSynthesisUtterance(text);
-      const voices = speechSynthesis.getVoices();
-      if(langPair.split("|")[1] === "en") {
-        utter.voice = voices.find(v => v.lang.startsWith("en")) || voices[0];
+const langMap = {
+  "es": "es-ES",
+  "en": "en-US",
+  "sv": "sv-SE"
+};
+
+// ✅ Translation API (free MyMemory demo, can be swapped later)
+async function translateText(text){
+  try {
+    const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}`);
+    const data = await res.json();
+    return data.responseData.translatedText || "[No translation]";
+  } catch(e){ return "[Translation Error]"; }
+}
+
+// ✅ Speak translation
+function speakText(text){
+  if(!audioUnlocked) return;
+  const utter = new SpeechSynthesisUtterance(text);
+  const voices = speechSynthesis.getVoices();
+  const targetLang = langPair.split("|")[1];
+
+  // Try to match target language voice
+  utter.voice = voices.find(v => v.lang.startsWith(targetLang)) || voices[0];
+  utter.rate = 1; utter.pitch = 1; utter.volume = 1;
+  speechSynthesis.speak(utter);
+}
+
+// ✅ Commit sentence (translate + display + speak)
+function commitSentence(force=false){
+  const trimmed = sentenceBuffer.trim();
+  if(!trimmed) return;
+  if(/[.!?]$/.test(trimmed) || force){
+    const sentence = trimmed;
+    sentenceBuffer = "";
+    const phraseDiv = document.createElement("div");
+    phraseDiv.className="phrase";
+    phraseDiv.innerHTML = `<div class="src">🎙 ${sentence}</div><div class="trans">Translating...</div>`;
+    log.prepend(phraseDiv);
+
+    translateText(sentence).then(translated=>{
+      phraseDiv.querySelector(".trans").innerText=`➡️ ${translated}`;
+      speakText(translated);
+    });
+
+    if(chunkTimer) clearTimeout(chunkTimer);
+  }
+}
+
+// ✅ Restart 2s max chunk timer
+function resetChunkTimer(){
+  if(chunkTimer) clearTimeout(chunkTimer);
+  chunkTimer = setTimeout(()=> commitSentence(true), MAX_CHUNK_MS);
+}
+
+// ✅ Speech recognition setup
+if ("webkitSpeechRecognition" in window) {
+  recognition = new webkitSpeechRecognition();
+  recognition.lang = langMap["es"];
+  recognition.continuous = true;
+  recognition.interimResults = true;
+
+  recognition.onresult = (event)=>{
+    let interim="";
+    for(let i=event.resultIndex;i<event.results.length;i++){
+      const transcript = event.results[i][0].transcript;
+      if(event.results[i].isFinal){
+        sentenceBuffer += " "+transcript.trim();
+        commitSentence();
       } else {
-        utter.voice = voices.find(v => v.lang.startsWith("es")) || voices[0];
-      }
-      utter.rate = 1;
-      utter.pitch = 1;
-      utter.volume = 1;
-      speechSynthesis.speak(utter);
-    }
-
-    function commitSentence(force=false){
-      const trimmed = sentenceBuffer.trim();
-      if(!trimmed) return;
-      if(/[.!?]$/.test(trimmed) || force){
-        const sentence = trimmed;
-        sentenceBuffer = "";
-
-        const phraseDiv = document.createElement("div");
-        phraseDiv.className = "phrase";
-        phraseDiv.innerHTML = `<div class="src">🎙 ${sentence}</div><div class="trans">Translating...</div>`;
-        log.prepend(phraseDiv);
-
-        translateText(sentence).then(translated => {
-          phraseDiv.querySelector(".trans").innerText = `➡️ ${translated}`;
-          speakText(translated);
-        });
-
-        if(pauseTimer) clearTimeout(pauseTimer);
-        if(maxSpeakTimer) clearTimeout(maxSpeakTimer);
+        interim += transcript;
+        resetChunkTimer();
       }
     }
+    liveText.textContent = interim ? `📝 ${sentenceBuffer} ${interim}` : sentenceBuffer;
+  };
+} else {
+  alert("Your browser does not support speech recognition.");
+}
 
-    function resetPauseTimer(){
-      if(pauseTimer) clearTimeout(pauseTimer);
-      pauseTimer = setTimeout(()=> commitSentence(true), PAUSE_DELAY);
-    }
+// ✅ Switch translation direction
+directionSelect.addEventListener("change", ()=>{
+  langPair = directionSelect.value;
+  const srcLang = langPair.split("|")[0];
+  recognition.lang = langMap[srcLang];
+});
 
-    function resetMaxSpeakTimer(){
-      if(maxSpeakTimer) clearTimeout(maxSpeakTimer);
-      maxSpeakTimer = setTimeout(()=> commitSentence(true), MAX_SPEAK_DURATION);
-    }
+// ✅ Start/stop recording
+button.addEventListener("click", ()=>{
+  if(!recording){
+    recognition.start();
+    button.textContent="⏹ Stop";
+    recording=true;
+  } else{
+    recognition.stop();
+    button.textContent="🎤 Start";
+    recording=false;
+    liveText.textContent="";
+    sentenceBuffer="";
+    if(chunkTimer) clearTimeout(chunkTimer);
+  }
+});
 
-    recognition.onresult = (event) => {
-      let interim = "";
-      for(let i=event.resultIndex;i<event.results.length;i++){
-        const transcript = event.results[i][0].transcript;
-        if(event.results[i].isFinal){
-          sentenceBuffer += " " + transcript.trim();
-          resetPauseTimer();
-          resetMaxSpeakTimer();
-          if(/[.!?]$/.test(sentenceBuffer.trim())){
-            commitSentence();
-          }
-        } else {
-          interim += transcript;
-          resetMaxSpeakTimer(); // keep max speak timer running
-          resetPauseTimer();   // also reset pause timer for ongoing speech
-        }
-      }
-      liveText.textContent = interim ? `📝 ${sentenceBuffer} ${interim}` : sentenceBuffer;
-    };
-
-    directionSelect.addEventListener("change", ()=>{
-      langPair = directionSelect.value;
-      recognition.lang = langPair.startsWith("es") ? "es-ES" : "en-US";
-    });
-
-    button.addEventListener("click", ()=>{
-      if(!recording){
-        recognition.start();
-        button.textContent = "⏹ Stop";
-        recording = true;
-      } else{
-        recognition.stop();
-        button.textContent = "🎤 Start";
-        recording = false;
-        liveText.textContent = "";
-        sentenceBuffer = "";
-        if(pauseTimer) clearTimeout(pauseTimer);
-        if(maxSpeakTimer) clearTimeout(maxSpeakTimer);
-      }
-    });
-
-    enableAudioBtn.addEventListener("click", ()=>{
-      audioUnlocked = true;
-      speakText("Audio Enabled");
-      enableAudioBtn.style.display = "none"; 
-    });
-  </script>
+// ✅ Unlock audio (required on mobile Safari/Chrome)
+enableAudioBtn.addEventListener("click", ()=>{
+  audioUnlocked=true;
+  speakText("Audio enabled");
+  enableAudioBtn.style.display="none";
+});
+</script>
 </body>
 </html>
