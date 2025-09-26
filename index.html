@@ -16,6 +16,21 @@
     .phrase { margin-bottom:10px; padding:10px; border-bottom:1px solid #eee; }
     .src { font-weight:bold; color:#333; }
     .trans { color:#007bff; margin-top:5px; }
+
+    /* Mic indicator */
+    .mic-indicator {
+      width: 30px; height: 30px;
+      border-radius: 50%;
+      margin: 0 auto;
+      background: red;
+      animation: pulse 1s infinite;
+      display: none;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.6; }
+      100% { transform: scale(1); opacity: 1; }
+    }
   </style>
 </head>
 <body>
@@ -32,6 +47,8 @@
   <button id="enableAudio">🔊 Enable Audio</button>
 </div>
 
+<div class="mic-indicator" id="micIndicator"></div>
+
 <div class="log" id="log">
   <div id="liveText" class="live"></div>
 </div>
@@ -39,6 +56,7 @@
 <script>
 const button = document.getElementById("toggleRec");
 const enableAudioBtn = document.getElementById("enableAudio");
+const micIndicator = document.getElementById("micIndicator");
 const log = document.getElementById("log");
 const liveText = document.getElementById("liveText");
 const directionSelect = document.getElementById("direction");
@@ -48,9 +66,11 @@ let recording = false;
 let langPair = "es|en";
 let sentenceBuffer = "";
 let chunkTimer = null;
+let pauseTimer = null;
 let audioUnlocked = false;
 
-const MAX_CHUNK_MS = 2000; // force break after 2s of continuous speech
+const MAX_CHUNK_MS = 2000; // max 2s talking
+const PAUSE_DELAY = 250;   // 0.25s pause ends chunk
 
 const langMap = {
   "es": "es-ES",
@@ -58,7 +78,7 @@ const langMap = {
   "sv": "sv-SE"
 };
 
-// ✅ Translation API (free MyMemory demo, can be swapped later)
+// ✅ Translation API (MyMemory free demo)
 async function translateText(text){
   try {
     const res = await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${langPair}`);
@@ -74,13 +94,12 @@ function speakText(text){
   const voices = speechSynthesis.getVoices();
   const targetLang = langPair.split("|")[1];
 
-  // Try to match target language voice
   utter.voice = voices.find(v => v.lang.startsWith(targetLang)) || voices[0];
   utter.rate = 1; utter.pitch = 1; utter.volume = 1;
   speechSynthesis.speak(utter);
 }
 
-// ✅ Commit sentence (translate + display + speak)
+// ✅ Commit sentence
 function commitSentence(force=false){
   const trimmed = sentenceBuffer.trim();
   if(!trimmed) return;
@@ -98,13 +117,18 @@ function commitSentence(force=false){
     });
 
     if(chunkTimer) clearTimeout(chunkTimer);
+    if(pauseTimer) clearTimeout(pauseTimer);
   }
 }
 
-// ✅ Restart 2s max chunk timer
+// ✅ Reset timers
 function resetChunkTimer(){
   if(chunkTimer) clearTimeout(chunkTimer);
   chunkTimer = setTimeout(()=> commitSentence(true), MAX_CHUNK_MS);
+}
+function resetPauseTimer(){
+  if(pauseTimer) clearTimeout(pauseTimer);
+  pauseTimer = setTimeout(()=> commitSentence(true), PAUSE_DELAY);
 }
 
 // ✅ Speech recognition setup
@@ -124,6 +148,7 @@ if ("webkitSpeechRecognition" in window) {
       } else {
         interim += transcript;
         resetChunkTimer();
+        resetPauseTimer();
       }
     }
     liveText.textContent = interim ? `📝 ${sentenceBuffer} ${interim}` : sentenceBuffer;
@@ -143,19 +168,22 @@ directionSelect.addEventListener("change", ()=>{
 button.addEventListener("click", ()=>{
   if(!recording){
     recognition.start();
+    micIndicator.style.display="block";
     button.textContent="⏹ Stop";
     recording=true;
   } else{
     recognition.stop();
+    micIndicator.style.display="none";
     button.textContent="🎤 Start";
     recording=false;
     liveText.textContent="";
     sentenceBuffer="";
     if(chunkTimer) clearTimeout(chunkTimer);
+    if(pauseTimer) clearTimeout(pauseTimer);
   }
 });
 
-// ✅ Unlock audio (required on mobile Safari/Chrome)
+// ✅ Unlock audio (needed for mobile)
 enableAudioBtn.addEventListener("click", ()=>{
   audioUnlocked=true;
   speakText("Audio enabled");
