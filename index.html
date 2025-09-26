@@ -24,7 +24,12 @@
       background: gray;
       cursor: not-allowed;
     }
-    #translations {
+    select {
+      padding: 8px;
+      font-size: 16px;
+      margin: 5px;
+    }
+    #translations, #liveText {
       margin-top: 20px;
       text-align: left;
       max-width: 500px;
@@ -35,40 +40,52 @@
       border-radius: 10px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
+    #liveText {
+      font-style: italic;
+      color: #333;
+    }
   </style>
 </head>
 <body>
   <h1>Real-Time Translator 🌍</h1>
-  <p>Select direction and press Start to record:</p>
+  <p>Select languages and press Start:</p>
 
-  <select id="direction">
-    <option value="es|en">Spanish → English</option>
-    <option value="en|es">English → Spanish</option>
-    <option value="sv|en">Swedish → English</option>
-    <option value="en|sv">English → Swedish</option>
-    <option value="fr|en">French → English</option>
-    <option value="en|fr">English → French</option>
-    <option value="fr|es">French → Spanish</option>
-    <option value="es|fr">Spanish → French</option>
+  <label for="fromLang">🎤 Input Language:</label>
+  <select id="fromLang">
+    <option value="en">English</option>
+    <option value="es">Spanish</option>
+    <option value="sv">Swedish</option>
+    <option value="fr">French</option>
+  </select>
+
+  <label for="toLang">🔊 Output Language:</label>
+  <select id="toLang">
+    <option value="en">English</option>
+    <option value="es">Spanish</option>
+    <option value="sv">Swedish</option>
+    <option value="fr">French</option>
   </select>
 
   <br><br>
   <button id="startBtn">▶ Start</button>
   <button id="stopBtn" disabled>⏹ Stop</button>
 
+  <div id="liveText">🎙️ Live text will appear here...</div>
   <div id="translations"></div>
 
   <script>
     const startBtn = document.getElementById("startBtn");
     const stopBtn = document.getElementById("stopBtn");
     const translationsDiv = document.getElementById("translations");
-    const direction = document.getElementById("direction");
+    const liveText = document.getElementById("liveText");
+    const fromLang = document.getElementById("fromLang");
+    const toLang = document.getElementById("toLang");
 
     const langMap = {
-      "es": "es-ES", // Spanish
-      "en": "en-US", // English
-      "sv": "sv-SE", // Swedish
-      "fr": "fr-FR"  // French
+      "es": "es-ES",
+      "en": "en-US",
+      "sv": "sv-SE",
+      "fr": "fr-FR"
     };
 
     let recognition;
@@ -99,17 +116,24 @@
           }
         }
 
-        if (finalTranscript) {
-          processChunk(finalTranscript);
-        } else if (interimTranscript) {
-          // Check if 2 seconds of speaking passed
-          if (now - speakingStart > 2000) {
-            processChunk(interimTranscript);
-            speakingStart = now;
-          }
+        // Show live transcription
+        if (interimTranscript) {
+          liveText.textContent = "🎙️ " + interimTranscript;
+          currentTranscript = interimTranscript;
         }
 
-        // Check if pause longer than 0.25s
+        if (finalTranscript) {
+          liveText.textContent = "🎙️ " + finalTranscript;
+          processChunk(finalTranscript);
+        }
+
+        // 2s speaking break
+        if (interimTranscript && now - speakingStart > 2000) {
+          processChunk(interimTranscript);
+          speakingStart = now;
+        }
+
+        // 0.25s pause break
         if (lastSpeechTime && now - lastSpeechTime > 250 && currentTranscript) {
           processChunk(currentTranscript);
           currentTranscript = "";
@@ -126,7 +150,15 @@
       if (!transcript) return;
 
       currentTranscript = "";
-      const [from, to] = direction.value.split("|");
+
+      const from = fromLang.value;
+      const to = toLang.value;
+
+      if (from === to) {
+        translationsDiv.innerHTML += `<p><strong>${transcript}</strong> → (same language, no translation)</p>`;
+        speak(transcript, langMap[to]);
+        return;
+      }
 
       fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(transcript)}&langpair=${from}|${to}`)
         .then(res => res.json())
@@ -152,8 +184,7 @@
     }
 
     startBtn.addEventListener("click", () => {
-      const from = direction.value.split("|")[0];
-      recognition.lang = langMap[from];
+      recognition.lang = langMap[fromLang.value];
       recognition.start();
       isRecording = true;
       startBtn.disabled = true;
@@ -167,7 +198,7 @@
       stopBtn.disabled = true;
     });
 
-    // Load voices (fix Chrome bug)
+    // Fix Chrome voices not loading immediately
     window.speechSynthesis.onvoiceschanged = () => {};
   </script>
 </body>
