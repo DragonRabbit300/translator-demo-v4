@@ -41,7 +41,7 @@
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
     #translations {
-      max-height: 250px;
+      max-height: 250px; /* keep it scrollable */
       overflow-y: auto;
     }
     #liveText {
@@ -85,132 +85,131 @@
     const fromLang = document.getElementById("fromLang");
     const toLang = document.getElementById("toLang");
 
-    const langMap = { "es":"es-ES", "en":"en-US", "sv":"sv-SE", "fr":"fr-FR" };
+    const langMap = {
+      "es": "es-ES",
+      "en": "en-US",
+      "sv": "sv-SE",
+      "fr": "fr-FR"
+    };
 
     let recognition;
-    let sentenceBuffer = "";
-    let currentInterim = "";
-    let lastFinal = "";
-    let speakingStart = null;
-    let pauseTimer = null;
-    let maxSpeakTimer = null;
-
-    function clearTimers() {
-      if (pauseTimer) clearTimeout(pauseTimer);
-      if (maxSpeakTimer) clearTimeout(maxSpeakTimer);
-      pauseTimer = null;
-      maxSpeakTimer = null;
-      speakingStart = null;
-    }
-
-    function updateLiveText(txt) { liveText.textContent = txt; }
-
-    function commitSentence(force=false) {
-      const combined = (sentenceBuffer + " " + currentInterim).trim();
-      if (!combined) return;
-
-      if (!force && !/[.!?]$/.test(combined)) return;
-
-      sentenceBuffer = "";
-      currentInterim = "";
-      lastFinal = "";
-      updateLiveText("🎙️ …");
-
-      translateAndSpeak(combined);
-
-      clearTimers();
-    }
+    let currentTranscript = "";
+    let lastSpeechTime = 0;
+    let speakingStart = 0;
 
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
 
-      recognition.onresult = (ev) => {
-        let interimSeen = false;
+      recognition.onresult = (event) => {
+        let interimTranscript = "";
+        let finalTranscript = "";
+        let now = Date.now();
 
-        for (let i = ev.resultIndex; i < ev.results.length; i++) {
-          const result = ev.results[i];
-          const transcript = (result[0].transcript || "").trim();
-
-          if (result.isFinal) {
-            if (!transcript.startsWith(lastFinal)) {
-              sentenceBuffer = (sentenceBuffer + " " + transcript).trim();
-              lastFinal = transcript;
-            }
-
-            if (/[.!?]$/.test(sentenceBuffer)) commitSentence(false);
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          let transcript = event.results[i][0].transcript.trim();
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + " ";
+            speakingStart = 0;
           } else {
-            interimSeen = true;
-            currentInterim = transcript;
+            interimTranscript += transcript + " ";
+            if (!speakingStart) speakingStart = now;
+            lastSpeechTime = now;
           }
         }
 
-        if (interimSeen && currentInterim) {
-          updateLiveText("📝 " + currentInterim);
-          if (!speakingStart) {
-            speakingStart = Date.now();
-            if (maxSpeakTimer) clearTimeout(maxSpeakTimer);
-            maxSpeakTimer = setTimeout(()=>commitSentence(true),2000);
-          }
+        // Show live transcription
+        if (interimTranscript) {
+          liveText.textContent = "🎙️ " + interimTranscript;
+          currentTranscript = interimTranscript;
         }
 
-        if (pauseTimer) clearTimeout(pauseTimer);
-        pauseTimer = setTimeout(()=>commitSentence(true), 250);
+        if (finalTranscript) {
+          liveText.textContent = "🎙️ " + finalTranscript;
+          processChunk(finalTranscript);
+        }
+
+        // 2s speaking break
+        if (interimTranscript && now - speakingStart > 2000) {
+          processChunk(interimTranscript);
+          currentTranscript = "";
+          liveText.textContent = "🎙️ …";
+          speakingStart = now;
+        }
+
+        // 0.25s pause break
+        if (lastSpeechTime && now - lastSpeechTime > 250 && currentTranscript) {
+          processChunk(currentTranscript);
+          currentTranscript = "";
+          liveText.textContent = "🎙️ …";
+          lastSpeechTime = 0;
+          speakingStart = 0;
+        }
       };
+    } else {
+      alert("Speech Recognition not supported in this browser.");
+    }
 
-      recognition.onerror = (e)=>{ console.warn("Recognition error:", e); }
-    } else { alert("Speech Recognition not supported in this browser."); }
+    function processChunk(transcript) {
+      transcript = transcript.trim();
+      if (!transcript) return;
 
-    function translateAndSpeak(text){
+      currentTranscript = "";
+      liveText.textContent = "🎙️ …"; // reset display after sending chunk
+
       const from = fromLang.value;
       const to = toLang.value;
 
-      if(from===to){
-        addTranslation(text,text);
-        speak(text,langMap[to]);
+      if (from === to) {
+        addTranslation(transcript, transcript);
+        speak(transcript, langMap[to]);
         return;
       }
 
-      fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`)
-        .then(res=>res.json())
-        .then(data=>{
-          const translated = data?.responseData?.translatedText || "(translation failed)";
-          addTranslation(text,translated);
-          speak(translated,langMap[to]);
+      fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(transcript)}&langpair=${from}|${to}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.responseData) {
+            const translated = data.responseData.translatedText;
+            addTranslation(transcript, translated);
+            speak(translated, langMap[to]);
+          }
         })
-        .catch(()=>{ addTranslation(text,"(translation failed)"); });
+        .catch(() => {
+          addTranslation(transcript, "(translation failed)");
+        });
     }
 
-    function addTranslation(original, translated){
+    function addTranslation(original, translated) {
       translationsDiv.innerHTML += `<p><strong>${original}</strong> → ${translated}</p>`;
-      translationsDiv.scrollTop = translationsDiv.scrollHeight;
+      translationsDiv.scrollTop = translationsDiv.scrollHeight; // auto-scroll
     }
 
-    function speak(text, langCode){
-      const utter = new SpeechSynthesisUtterance(text);
+    function speak(text, langCode) {
+      const utterance = new SpeechSynthesisUtterance(text);
       const voices = speechSynthesis.getVoices();
-      const match = voices.find(v=>v.lang.startsWith(langCode));
-      if(match) utter.voice=match;
-      utter.lang = langCode;
-      speechSynthesis.speak(utter);
+      const match = voices.find(v => v.lang.startsWith(langCode));
+      if (match) utterance.voice = match;
+      utterance.lang = langCode;
+      speechSynthesis.speak(utterance);
     }
 
-    startBtn.addEventListener("click", ()=>{
+    startBtn.addEventListener("click", () => {
       recognition.lang = langMap[fromLang.value];
       recognition.start();
       startBtn.disabled = true;
       stopBtn.disabled = false;
     });
 
-    stopBtn.addEventListener("click", ()=>{
+    stopBtn.addEventListener("click", () => {
       recognition.stop();
       startBtn.disabled = false;
       stopBtn.disabled = true;
-      commitSentence(true);
     });
 
-    window.speechSynthesis.onvoiceschanged = ()=>{};
+    // Fix Chrome voices not loading immediately
+    window.speechSynthesis.onvoiceschanged = () => {};
   </script>
 </body>
 </html>
