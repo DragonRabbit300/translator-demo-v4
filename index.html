@@ -44,6 +44,25 @@
       max-height: 250px; 
       overflow-y: auto;
     }
+    .chunk {
+      padding: 5px;
+      margin-bottom: 5px;
+      border-radius: 5px;
+      background-color: #e0f7fa;
+      position: relative;
+    }
+    .replayBtn {
+      position: absolute;
+      right: 10px;
+      top: 5px;
+      background: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      padding: 2px 5px;
+      cursor: pointer;
+      font-size: 12px;
+    }
     #liveText {
       font-style: italic;
       color: #333;
@@ -108,8 +127,6 @@
             finalTranscript += transcript + " ";
           } else {
             interimTranscript += transcript + " ";
-            if (!speakingStart) speakingStart = now;
-            lastSpeechTime = now;
           }
         }
 
@@ -117,20 +134,22 @@
         if (interimTranscript) {
           liveText.textContent = "🎙️ " + interimTranscript;
           currentTranscript = interimTranscript;
+          if (!speakingStart) speakingStart = now; // start continuous speech timer
+          lastSpeechTime = now; // update pause timer
         }
 
         if (finalTranscript) {
           liveText.textContent = "🎙️ " + finalTranscript;
           currentTranscript = finalTranscript;
-          commitChunk(); // commit final transcripts immediately
+          commitChunk();
         }
 
-        // 2s continuous speech break
+        // 2-second continuous speech break
         if (speakingStart && now - speakingStart > 2000) {
           commitChunk();
         }
 
-        // 0.25s pause break
+        // 0.25-second pause break
         if (lastSpeechTime && now - lastSpeechTime > 250) {
           commitChunk();
         }
@@ -170,7 +189,16 @@
     }
 
     function addTranslation(original, translated) {
-      translationsDiv.innerHTML += `<p><strong>${original}</strong> → ${translated}</p>`;
+      const chunkDiv = document.createElement("div");
+      chunkDiv.className = "chunk";
+      chunkDiv.innerHTML = `<strong>${original}</strong> → ${translated}`;
+      const replayBtn = document.createElement("button");
+      replayBtn.textContent = "🔊";
+      replayBtn.className = "replayBtn";
+      replayBtn.onclick = () => speak(translated, langMap[toLang.value]);
+      chunkDiv.appendChild(replayBtn);
+
+      translationsDiv.appendChild(chunkDiv);
       translationsDiv.scrollTop = translationsDiv.scrollHeight;
     }
 
@@ -201,4 +229,3 @@
   </script>
 </body>
 </html>
-
