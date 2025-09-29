@@ -40,6 +40,10 @@
       border-radius: 10px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
+    #translations {
+      max-height: 250px; /* scrollable */
+      overflow-y: auto;
+    }
     #liveText {
       font-style: italic;
       color: #333;
@@ -122,25 +126,17 @@
         }
 
         if (finalTranscript) {
-          liveText.textContent = "🎙️ " + finalTranscript;
           processChunk(finalTranscript);
         }
 
         // 2s speaking break
         if (interimTranscript && now - speakingStart > 2000) {
           processChunk(interimTranscript);
-          currentTranscript = "";
-          liveText.textContent = "🎙️ …";
-          speakingStart = now;
         }
 
         // 0.25s pause break
         if (lastSpeechTime && now - lastSpeechTime > 250 && currentTranscript) {
           processChunk(currentTranscript);
-          currentTranscript = "";
-          liveText.textContent = "🎙️ …";
-          lastSpeechTime = 0;
-          speakingStart = 0;
         }
       };
     } else {
@@ -153,12 +149,14 @@
 
       currentTranscript = "";
       liveText.textContent = "🎙️ …"; // reset display after sending chunk
+      lastSpeechTime = 0;
+      speakingStart = 0;
 
       const from = fromLang.value;
       const to = toLang.value;
 
       if (from === to) {
-        translationsDiv.innerHTML += `<p><strong>${transcript}</strong> → (same language, no translation)</p>`;
+        addTranslation(transcript, transcript);
         speak(transcript, langMap[to]);
         return;
       }
@@ -168,13 +166,18 @@
         .then(data => {
           if (data && data.responseData) {
             const translated = data.responseData.translatedText;
-            translationsDiv.innerHTML += `<p><strong>${transcript}</strong> → ${translated}</p>`;
+            addTranslation(transcript, translated);
             speak(translated, langMap[to]);
           }
         })
         .catch(() => {
-          translationsDiv.innerHTML += `<p><strong>${transcript}</strong> → (translation failed)</p>`;
+          addTranslation(transcript, "(translation failed)");
         });
+    }
+
+    function addTranslation(original, translated) {
+      translationsDiv.innerHTML += `<p><strong>${original}</strong> → ${translated}</p>`;
+      translationsDiv.scrollTop = translationsDiv.scrollHeight; // auto-scroll
     }
 
     function speak(text, langCode) {
@@ -199,7 +202,6 @@
       stopBtn.disabled = true;
     });
 
-    // Fix Chrome voices not loading immediately
     window.speechSynthesis.onvoiceschanged = () => {};
   </script>
 </body>
