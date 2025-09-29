@@ -41,7 +41,7 @@
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
     #translations {
-      max-height: 250px; /* scrollable */
+      max-height: 250px;
       overflow-y: auto;
     }
     #liveText {
@@ -129,14 +129,18 @@
           processChunk(finalTranscript);
         }
 
-        // 2s speaking break
-        if (interimTranscript && now - speakingStart > 2000) {
+        // 2s continuous talking break
+        if (interimTranscript && speakingStart && now - speakingStart > 2000) {
           processChunk(interimTranscript);
+          speakingStart = 0; // reset timer
         }
 
         // 0.25s pause break
         if (lastSpeechTime && now - lastSpeechTime > 250 && currentTranscript) {
           processChunk(currentTranscript);
+          currentTranscript = "";
+          lastSpeechTime = 0;
+          speakingStart = 0;
         }
       };
     } else {
@@ -147,10 +151,9 @@
       transcript = transcript.trim();
       if (!transcript) return;
 
+      // Reset live text and transcript after each chunk
       currentTranscript = "";
-      liveText.textContent = "🎙️ …"; // reset display after sending chunk
-      lastSpeechTime = 0;
-      speakingStart = 0;
+      liveText.textContent = "🎙️ …";
 
       const from = fromLang.value;
       const to = toLang.value;
