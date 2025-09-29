@@ -89,7 +89,6 @@
     };
 
     let recognition;
-    let isRecording = false;
     let currentTranscript = "";
     let lastSpeechTime = 0;
     let speakingStart = 0;
@@ -130,6 +129,8 @@
         // 2s speaking break
         if (interimTranscript && now - speakingStart > 2000) {
           processChunk(interimTranscript);
+          currentTranscript = "";
+          liveText.textContent = "🎙️ …";
           speakingStart = now;
         }
 
@@ -137,6 +138,7 @@
         if (lastSpeechTime && now - lastSpeechTime > 250 && currentTranscript) {
           processChunk(currentTranscript);
           currentTranscript = "";
+          liveText.textContent = "🎙️ …";
           lastSpeechTime = 0;
           speakingStart = 0;
         }
@@ -150,6 +152,7 @@
       if (!transcript) return;
 
       currentTranscript = "";
+      liveText.textContent = "🎙️ …"; // reset display after sending chunk
 
       const from = fromLang.value;
       const to = toLang.value;
@@ -186,14 +189,12 @@
     startBtn.addEventListener("click", () => {
       recognition.lang = langMap[fromLang.value];
       recognition.start();
-      isRecording = true;
       startBtn.disabled = true;
       stopBtn.disabled = false;
     });
 
     stopBtn.addEventListener("click", () => {
       recognition.stop();
-      isRecording = false;
       startBtn.disabled = false;
       stopBtn.disabled = true;
     });
