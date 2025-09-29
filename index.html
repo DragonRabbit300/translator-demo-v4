@@ -41,7 +41,7 @@
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
     #translations {
-      max-height: 250px; /* keep it scrollable */
+      max-height: 250px; 
       overflow-y: auto;
     }
     #liveText {
@@ -85,17 +85,12 @@
     const fromLang = document.getElementById("fromLang");
     const toLang = document.getElementById("toLang");
 
-    const langMap = {
-      "es": "es-ES",
-      "en": "en-US",
-      "sv": "sv-SE",
-      "fr": "fr-FR"
-    };
+    const langMap = { "es":"es-ES", "en":"en-US", "sv":"sv-SE", "fr":"fr-FR" };
 
     let recognition;
     let currentTranscript = "";
-    let lastSpeechTime = 0;
     let speakingStart = 0;
+    let lastSpeechTime = 0;
 
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
@@ -105,13 +100,12 @@
       recognition.onresult = (event) => {
         let interimTranscript = "";
         let finalTranscript = "";
-        let now = Date.now();
+        const now = Date.now();
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
-          let transcript = event.results[i][0].transcript.trim();
+          const transcript = (event.results[i][0].transcript || "").trim();
           if (event.results[i].isFinal) {
             finalTranscript += transcript + " ";
-            speakingStart = 0;
           } else {
             interimTranscript += transcript + " ";
             if (!speakingStart) speakingStart = now;
@@ -127,36 +121,34 @@
 
         if (finalTranscript) {
           liveText.textContent = "🎙️ " + finalTranscript;
-          processChunk(finalTranscript);
+          currentTranscript = finalTranscript;
+          commitChunk(); // commit final transcripts immediately
         }
 
-        // 2s speaking break
-        if (interimTranscript && now - speakingStart > 2000) {
-          processChunk(interimTranscript);
-          currentTranscript = "";
-          liveText.textContent = "🎙️ …";
-          speakingStart = now;
+        // 2s continuous speech break
+        if (speakingStart && now - speakingStart > 2000) {
+          commitChunk();
         }
 
         // 0.25s pause break
-        if (lastSpeechTime && now - lastSpeechTime > 250 && currentTranscript) {
-          processChunk(currentTranscript);
-          currentTranscript = "";
-          liveText.textContent = "🎙️ …";
-          lastSpeechTime = 0;
-          speakingStart = 0;
+        if (lastSpeechTime && now - lastSpeechTime > 250) {
+          commitChunk();
         }
       };
+
+      recognition.onerror = (e) => { console.warn("Recognition error:", e); };
     } else {
       alert("Speech Recognition not supported in this browser.");
     }
 
-    function processChunk(transcript) {
-      transcript = transcript.trim();
+    function commitChunk() {
+      const transcript = currentTranscript.trim();
       if (!transcript) return;
 
       currentTranscript = "";
-      liveText.textContent = "🎙️ …"; // reset display after sending chunk
+      speakingStart = 0;
+      lastSpeechTime = 0;
+      liveText.textContent = "🎙️ …";
 
       const from = fromLang.value;
       const to = toLang.value;
@@ -170,20 +162,16 @@
       fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(transcript)}&langpair=${from}|${to}`)
         .then(res => res.json())
         .then(data => {
-          if (data && data.responseData) {
-            const translated = data.responseData.translatedText;
-            addTranslation(transcript, translated);
-            speak(translated, langMap[to]);
-          }
+          const translated = data?.responseData?.translatedText || "(translation failed)";
+          addTranslation(transcript, translated);
+          speak(translated, langMap[to]);
         })
-        .catch(() => {
-          addTranslation(transcript, "(translation failed)");
-        });
+        .catch(() => addTranslation(transcript, "(translation failed)"));
     }
 
     function addTranslation(original, translated) {
       translationsDiv.innerHTML += `<p><strong>${original}</strong> → ${translated}</p>`;
-      translationsDiv.scrollTop = translationsDiv.scrollHeight; // auto-scroll
+      translationsDiv.scrollTop = translationsDiv.scrollHeight;
     }
 
     function speak(text, langCode) {
@@ -206,10 +194,11 @@
       recognition.stop();
       startBtn.disabled = false;
       stopBtn.disabled = true;
+      commitChunk(); // commit anything left
     });
 
-    // Fix Chrome voices not loading immediately
     window.speechSynthesis.onvoiceschanged = () => {};
   </script>
 </body>
 </html>
+
