@@ -85,16 +85,12 @@
     const fromLang = document.getElementById("fromLang");
     const toLang = document.getElementById("toLang");
 
-    const langMap = {
-      "es": "es-ES",
-      "en": "en-US",
-      "sv": "sv-SE",
-      "fr": "fr-FR"
-    };
+    const langMap = { "es":"es-ES", "en":"en-US", "sv":"sv-SE", "fr":"fr-FR" };
 
     let recognition;
     let sentenceBuffer = "";
     let currentInterim = "";
+    let lastFinal = "";
     let speakingStart = null;
     let pauseTimer = null;
     let maxSpeakTimer = null;
@@ -107,9 +103,7 @@
       speakingStart = null;
     }
 
-    function updateLiveText(txt) {
-      liveText.textContent = txt;
-    }
+    function updateLiveText(txt) { liveText.textContent = txt; }
 
     function commitSentence(force=false) {
       const combined = (sentenceBuffer + " " + currentInterim).trim();
@@ -119,6 +113,7 @@
 
       sentenceBuffer = "";
       currentInterim = "";
+      lastFinal = "";
       updateLiveText("🎙️ …");
 
       translateAndSpeak(combined);
@@ -139,10 +134,12 @@
           const transcript = (result[0].transcript || "").trim();
 
           if (result.isFinal) {
-            sentenceBuffer = (sentenceBuffer + " " + transcript).trim();
-            if (/[.!?]$/.test(sentenceBuffer)) {
-              commitSentence(false);
+            if (!transcript.startsWith(lastFinal)) {
+              sentenceBuffer = (sentenceBuffer + " " + transcript).trim();
+              lastFinal = transcript;
             }
+
+            if (/[.!?]$/.test(sentenceBuffer)) commitSentence(false);
           } else {
             interimSeen = true;
             currentInterim = transcript;
@@ -154,69 +151,66 @@
           if (!speakingStart) {
             speakingStart = Date.now();
             if (maxSpeakTimer) clearTimeout(maxSpeakTimer);
-            maxSpeakTimer = setTimeout(() => commitSentence(true), 2000);
+            maxSpeakTimer = setTimeout(()=>commitSentence(true),2000);
           }
         }
 
         if (pauseTimer) clearTimeout(pauseTimer);
-        pauseTimer = setTimeout(() => commitSentence(true), 250);
+        pauseTimer = setTimeout(()=>commitSentence(true), 250);
       };
-    } else {
-      alert("Speech Recognition not supported in this browser.");
-    }
 
-    function translateAndSpeak(transcript) {
+      recognition.onerror = (e)=>{ console.warn("Recognition error:", e); }
+    } else { alert("Speech Recognition not supported in this browser."); }
+
+    function translateAndSpeak(text){
       const from = fromLang.value;
       const to = toLang.value;
 
-      if (from === to) {
-        addTranslation(transcript, transcript);
-        speak(transcript, langMap[to]);
+      if(from===to){
+        addTranslation(text,text);
+        speak(text,langMap[to]);
         return;
       }
 
-      fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(transcript)}&langpair=${from}|${to}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.responseData) {
-            const translated = data.responseData.translatedText;
-            addTranslation(transcript, translated);
-            speak(translated, langMap[to]);
-          }
+      fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`)
+        .then(res=>res.json())
+        .then(data=>{
+          const translated = data?.responseData?.translatedText || "(translation failed)";
+          addTranslation(text,translated);
+          speak(translated,langMap[to]);
         })
-        .catch(() => {
-          addTranslation(transcript, "(translation failed)");
-        });
+        .catch(()=>{ addTranslation(text,"(translation failed)"); });
     }
 
-    function addTranslation(original, translated) {
+    function addTranslation(original, translated){
       translationsDiv.innerHTML += `<p><strong>${original}</strong> → ${translated}</p>`;
       translationsDiv.scrollTop = translationsDiv.scrollHeight;
     }
 
-    function speak(text, langCode) {
-      const utterance = new SpeechSynthesisUtterance(text);
+    function speak(text, langCode){
+      const utter = new SpeechSynthesisUtterance(text);
       const voices = speechSynthesis.getVoices();
-      const match = voices.find(v => v.lang.startsWith(langCode));
-      if (match) utterance.voice = match;
-      utterance.lang = langCode;
-      speechSynthesis.speak(utterance);
+      const match = voices.find(v=>v.lang.startsWith(langCode));
+      if(match) utter.voice=match;
+      utter.lang = langCode;
+      speechSynthesis.speak(utter);
     }
 
-    startBtn.addEventListener("click", () => {
+    startBtn.addEventListener("click", ()=>{
       recognition.lang = langMap[fromLang.value];
       recognition.start();
       startBtn.disabled = true;
       stopBtn.disabled = false;
     });
 
-    stopBtn.addEventListener("click", () => {
+    stopBtn.addEventListener("click", ()=>{
       recognition.stop();
       startBtn.disabled = false;
       stopBtn.disabled = true;
+      commitSentence(true);
     });
 
-    window.speechSynthesis.onvoiceschanged = () => {};
+    window.speechSynthesis.onvoiceschanged = ()=>{};
   </script>
 </body>
 </html>
