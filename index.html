@@ -45,7 +45,7 @@
       overflow-y: auto;
     }
     .chunk {
-      padding: 5px;
+      padding: 5px 35px 5px 5px; /* space for replay button on the right */
       margin-bottom: 5px;
       border-radius: 5px;
       background-color: #e0f7fa;
@@ -53,8 +53,9 @@
     }
     .replayBtn {
       position: absolute;
-      right: 10px;
-      top: 5px;
+      right: 5px; /* move to far right */
+      top: 50%;
+      transform: translateY(-50%);
       background: #007BFF;
       color: white;
       border: none;
@@ -108,7 +109,6 @@
 
     let recognition;
     let currentTranscript = "";
-    let speakingStart = 0;
     let lastSpeechTime = 0;
 
     if ("webkitSpeechRecognition" in window) {
@@ -130,11 +130,9 @@
           }
         }
 
-        // Show live transcription
         if (interimTranscript) {
           liveText.textContent = "🎙️ " + interimTranscript;
           currentTranscript = interimTranscript;
-          if (!speakingStart) speakingStart = now; // start continuous speech timer
           lastSpeechTime = now; // update pause timer
         }
 
@@ -144,12 +142,7 @@
           commitChunk();
         }
 
-        // 2-second continuous speech break
-        if (speakingStart && now - speakingStart > 2000) {
-          commitChunk();
-        }
-
-        // 0.25-second pause break
+        // 0.25-second pause break only
         if (lastSpeechTime && now - lastSpeechTime > 250) {
           commitChunk();
         }
@@ -165,7 +158,6 @@
       if (!transcript) return;
 
       currentTranscript = "";
-      speakingStart = 0;
       lastSpeechTime = 0;
       liveText.textContent = "🎙️ …";
 
@@ -222,7 +214,7 @@
       recognition.stop();
       startBtn.disabled = false;
       stopBtn.disabled = true;
-      commitChunk(); // commit anything left
+      commitChunk();
     });
 
     window.speechSynthesis.onvoiceschanged = () => {};
