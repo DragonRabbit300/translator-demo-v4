@@ -45,7 +45,7 @@
       overflow-y: auto;
     }
     .chunk {
-      padding: 5px 35px 5px 5px; /* space for replay button on the right */
+      padding: 5px 35px 5px 5px; 
       margin-bottom: 5px;
       border-radius: 5px;
       background-color: #e0f7fa;
@@ -53,7 +53,7 @@
     }
     .replayBtn {
       position: absolute;
-      right: 5px; /* move to far right */
+      right: 5px; 
       top: 50%;
       transform: translateY(-50%);
       background: #007BFF;
@@ -91,15 +91,17 @@
   </select>
 
   <br><br>
-  <button id="startBtn">▶ Start</button>
-  <button id="stopBtn" disabled>⏹ Stop</button>
+  <button id="toggleBtn">▶ Start</button>
+  <button id="replayAllBtn">🔁 Replay All</button>
+  <button id="clearBtn">🧹 Clear All</button>
 
   <div id="liveText">🎙️ Live text will appear here...</div>
   <div id="translations"></div>
 
   <script>
-    const startBtn = document.getElementById("startBtn");
-    const stopBtn = document.getElementById("stopBtn");
+    const toggleBtn = document.getElementById("toggleBtn");
+    const replayAllBtn = document.getElementById("replayAllBtn");
+    const clearBtn = document.getElementById("clearBtn");
     const translationsDiv = document.getElementById("translations");
     const liveText = document.getElementById("liveText");
     const fromLang = document.getElementById("fromLang");
@@ -110,6 +112,8 @@
     let recognition;
     let currentTranscript = "";
     let lastSpeechTime = 0;
+    let listening = false;
+    let allTranslations = [];
 
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
@@ -133,7 +137,7 @@
         if (interimTranscript) {
           liveText.textContent = "🎙️ " + interimTranscript;
           currentTranscript = interimTranscript;
-          lastSpeechTime = now; // update pause timer
+          lastSpeechTime = now;
         }
 
         if (finalTranscript) {
@@ -142,7 +146,6 @@
           commitChunk();
         }
 
-        // 0.25-second pause break only
         if (lastSpeechTime && now - lastSpeechTime > 250) {
           commitChunk();
         }
@@ -192,6 +195,8 @@
 
       translationsDiv.appendChild(chunkDiv);
       translationsDiv.scrollTop = translationsDiv.scrollHeight;
+
+      allTranslations.push(translated);
     }
 
     function speak(text, langCode) {
@@ -203,18 +208,40 @@
       speechSynthesis.speak(utterance);
     }
 
-    startBtn.addEventListener("click", () => {
-      recognition.lang = langMap[fromLang.value];
-      recognition.start();
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
+    toggleBtn.addEventListener("click", () => {
+      if (!listening) {
+        recognition.lang = langMap[fromLang.value];
+        recognition.start();
+        listening = true;
+        toggleBtn.textContent = "⏹ Stop";
+      } else {
+        recognition.stop();
+        listening = false;
+        toggleBtn.textContent = "▶ Start";
+        commitChunk();
+      }
     });
 
-    stopBtn.addEventListener("click", () => {
-      recognition.stop();
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      commitChunk();
+    replayAllBtn.addEventListener("click", () => {
+      if (allTranslations.length === 0) {
+        alert("No translations to replay yet!");
+        return;
+      }
+      allTranslations.forEach((text, i) => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = langMap[toLang.value];
+        setTimeout(() => speechSynthesis.speak(utterance), i * 1500);
+      });
+    });
+
+    clearBtn.addEventListener("click", () => {
+      const confirmClear = confirm("Are you sure you want to clear all translations?");
+      if (!confirmClear) return;
+
+      translationsDiv.innerHTML = "";
+      liveText.textContent = "🎙️ Live text will appear here...";
+      allTranslations = [];
+      speechSynthesis.cancel();
     });
 
     window.speechSynthesis.onvoiceschanged = () => {};
