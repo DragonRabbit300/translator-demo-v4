@@ -8,108 +8,175 @@
     body {
       font-family: Arial, sans-serif;
       text-align: center;
-      padding: 20px;
+      padding: 15px;
+      background: #f2f6ff;
+      margin: 0;
     }
-    button {
-      padding: 12px 20px;
-      margin: 10px;
-      font-size: 16px;
+
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 10px;
+    }
+
+    select, button {
+      font-size: 1rem;
+      padding: 12px;
+      margin: 8px;
       border-radius: 10px;
       border: none;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+
+    select {
+      background: white;
+      width: 90%;
+      max-width: 350px;
+    }
+
+    button {
       background: #007BFF;
       color: white;
+      width: 90%;
+      max-width: 350px;
       cursor: pointer;
+      transition: 0.2s;
     }
+
+    button:active {
+      transform: scale(0.97);
+    }
+
     button:disabled {
       background: gray;
       cursor: not-allowed;
     }
-    select {
-      padding: 8px;
-      font-size: 16px;
-      margin: 5px;
-    }
+
     #translations, #liveText {
       margin-top: 20px;
       text-align: left;
       max-width: 500px;
       margin-left: auto;
       margin-right: auto;
-      background: #f8f8f8;
+      background: white;
       padding: 15px;
       border-radius: 10px;
       box-shadow: 0 2px 6px rgba(0,0,0,0.1);
     }
+
     #translations {
       max-height: 250px; 
       overflow-y: auto;
     }
+
     .chunk {
-      padding: 5px 35px 5px 5px; /* space for replay button on the right */
-      margin-bottom: 5px;
+      padding: 5px 40px 5px 5px;
+      margin-bottom: 8px;
       border-radius: 5px;
       background-color: #e0f7fa;
       position: relative;
+      font-size: 1rem;
+      word-wrap: break-word;
     }
+
     .replayBtn {
       position: absolute;
-      right: 5px; /* move to far right */
+      right: 5px;
       top: 50%;
       transform: translateY(-50%);
       background: #007BFF;
       color: white;
       border: none;
       border-radius: 5px;
-      padding: 2px 5px;
+      padding: 3px 7px;
       cursor: pointer;
-      font-size: 12px;
+      font-size: 0.9rem;
     }
+
     #liveText {
       font-style: italic;
       color: #333;
+      font-size: 1rem;
+    }
+
+    @media (max-width: 600px) {
+      h1 {
+        font-size: 1.5rem;
+      }
+      select, button {
+        font-size: 1rem;
+      }
+      #translations, #liveText {
+        width: 95%;
+      }
     }
   </style>
 </head>
 <body>
-  <h1>Real-Time Translator 🌍</h1>
-  <p>Select languages and press Start:</p>
+  <h1>🌍 Real-Time Translator</h1>
+  <p>Select your languages and tap Start:</p>
 
-  <label for="fromLang">🎤 Input Language:</label>
+  <label for="fromLang">🎤 Input Language:</label><br>
   <select id="fromLang">
     <option value="en">English</option>
     <option value="es">Spanish</option>
     <option value="sv">Swedish</option>
     <option value="fr">French</option>
-  </select>
+  </select><br>
 
-  <label for="toLang">🔊 Output Language:</label>
+  <label for="toLang">🔊 Output Language:</label><br>
   <select id="toLang">
     <option value="en">English</option>
     <option value="es">Spanish</option>
     <option value="sv">Swedish</option>
     <option value="fr">French</option>
-  </select>
+  </select><br>
 
-  <br><br>
-  <button id="startBtn">▶ Start</button>
-  <button id="stopBtn" disabled>⏹ Stop</button>
+  <button id="toggleBtn">▶ Allow Microphone & Start</button>
 
   <div id="liveText">🎙️ Live text will appear here...</div>
   <div id="translations"></div>
 
   <script>
-    const startBtn = document.getElementById("startBtn");
-    const stopBtn = document.getElementById("stopBtn");
+    const toggleBtn = document.getElementById("toggleBtn");
     const translationsDiv = document.getElementById("translations");
     const liveText = document.getElementById("liveText");
     const fromLang = document.getElementById("fromLang");
     const toLang = document.getElementById("toLang");
-
-    const langMap = { "es":"es-ES", "en":"en-US", "sv":"sv-SE", "fr":"fr-FR" };
+    const langMap = { "es": "es-ES", "en": "en-US", "sv": "sv-SE", "fr": "fr-FR" };
 
     let recognition;
+    let isListening = false;
     let currentTranscript = "";
     let lastSpeechTime = 0;
+    let ttsAllowed = false;
+
+    // Ask for audio playback permission on tap
+    async function requestPlaybackPermission() {
+      return new Promise(resolve => {
+        const audio = new Audio();
+        audio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="; // silent sound
+        audio.play()
+          .then(() => {
+            ttsAllowed = true;
+            resolve(true);
+          })
+          .catch(() => {
+            alert("Tap the screen to allow sound playback.");
+            resolve(false);
+          });
+      });
+    }
+
+    // Ask for mic permission before starting
+    async function requestMicPermission() {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        return true;
+      } catch {
+        alert("Microphone access is required for speech recognition.");
+        return false;
+      }
+    }
 
     if ("webkitSpeechRecognition" in window) {
       recognition = new webkitSpeechRecognition();
@@ -133,7 +200,7 @@
         if (interimTranscript) {
           liveText.textContent = "🎙️ " + interimTranscript;
           currentTranscript = interimTranscript;
-          lastSpeechTime = now; // update pause timer
+          lastSpeechTime = now;
         }
 
         if (finalTranscript) {
@@ -142,18 +209,17 @@
           commitChunk();
         }
 
-        // 0.25-second pause break only
-        if (lastSpeechTime && now - lastSpeechTime > 250) {
+        if (lastSpeechTime && now - lastSpeechTime > 300) {
           commitChunk();
         }
       };
 
-      recognition.onerror = (e) => { console.warn("Recognition error:", e); };
+      recognition.onerror = (e) => console.warn("Recognition error:", e);
     } else {
       alert("Speech Recognition not supported in this browser.");
     }
 
-    function commitChunk() {
+    async function commitChunk() {
       const transcript = currentTranscript.trim();
       if (!transcript) return;
 
@@ -195,6 +261,7 @@
     }
 
     function speak(text, langCode) {
+      if (!ttsAllowed) return; // don't play until permission granted
       const utterance = new SpeechSynthesisUtterance(text);
       const voices = speechSynthesis.getVoices();
       const match = voices.find(v => v.lang.startsWith(langCode));
@@ -203,18 +270,24 @@
       speechSynthesis.speak(utterance);
     }
 
-    startBtn.addEventListener("click", () => {
-      recognition.lang = langMap[fromLang.value];
-      recognition.start();
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
-    });
+    toggleBtn.addEventListener("click", async () => {
+      if (!isListening) {
+        const micAllowed = await requestMicPermission();
+        const soundAllowed = await requestPlaybackPermission();
+        if (!micAllowed || !soundAllowed) return;
 
-    stopBtn.addEventListener("click", () => {
-      recognition.stop();
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      commitChunk();
+        recognition.lang = langMap[fromLang.value];
+        recognition.start();
+        isListening = true;
+        toggleBtn.textContent = "⏹ Stop";
+        toggleBtn.style.background = "#dc3545";
+      } else {
+        recognition.stop();
+        isListening = false;
+        toggleBtn.textContent = "▶ Start";
+        toggleBtn.style.background = "#007BFF";
+        commitChunk();
+      }
     });
 
     window.speechSynthesis.onvoiceschanged = () => {};
