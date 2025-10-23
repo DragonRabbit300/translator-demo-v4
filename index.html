@@ -718,7 +718,11 @@ async function translateText(text, isManual = false) {
     return;
   }
 
-  const from = fromLang.value === 'auto' ? 'en' : fromLang.value;
+  // Detect language if auto-detect is enabled
+  let from = fromLang.value;
+  if (from === 'auto') {
+    from = await detectLanguage(text);
+  }
   const to = toLang.value;
   
   const cacheKey = `${from}|${to}|${text}`;
@@ -885,8 +889,16 @@ function speak(text, langCode) {
 // Toggle start/stop
 toggleBtn.addEventListener("click", () => {
   if (!listening) {
+    // For auto-detect, we need to listen in a default language first
+    // Speech recognition doesn't support true auto-detect, so we'll start with English
+    // and detect the actual language when we get the transcript
     const lang = fromLang.value === 'auto' ? 'en-US' : langMap[fromLang.value];
     recognition.lang = lang;
+    
+    if (fromLang.value === 'auto') {
+      showStatus("Auto-detect enabled - speak in any language!", false, false);
+    }
+    
     try {
       recognition.start();
       listening = true;
