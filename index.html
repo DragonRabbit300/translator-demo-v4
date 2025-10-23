@@ -14,6 +14,9 @@
   .chunk { padding: 5px 35px 5px 5px; margin-bottom: 5px; border-radius: 5px; background-color: #e0f7fa; position: relative; }
   .replayBtn { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); background: #007BFF; color: white; border: none; border-radius: 5px; padding: 2px 5px; cursor: pointer; font-size: 12px; }
   #liveText { font-style: italic; color: #333; }
+  .status { margin-top: 10px; padding: 10px; border-radius: 5px; font-size: 14px; }
+  .status.error { background: #ffebee; color: #c62828; }
+  .status.success { background: #e8f5e9; color: #2e7d32; }
 </style>
 </head>
 <body>
@@ -44,6 +47,7 @@
 <button id="replayAllBtn">🔁 Replay All</button>
 <button id="clearBtn">🧹 Clear All</button>
 
+<div id="statusDiv" class="status" style="display:none;"></div>
 <div id="liveText">🎙️ Live text will appear here...</div>
 <div id="translations"></div>
 
@@ -56,6 +60,7 @@ const translationsDiv = document.getElementById("translations");
 const liveText = document.getElementById("liveText");
 const fromLang = document.getElementById("fromLang");
 const toLang = document.getElementById("toLang");
+const statusDiv = document.getElementById("statusDiv");
 
 const langMap = { "es":"es-ES", "en":"en-US", "sv":"sv-SE", "fr":"fr-FR" };
 
@@ -65,14 +70,62 @@ let lastSpeechTime = 0;
 let listening = false;
 let allTranslations = [];
 let audioEnabled = false;
+let voicesLoaded = false;
 
-enableAudioBtn.addEventListener("click", () => {
-  // Unlock speech synthesis on mobile
-  const utterance = new SpeechSynthesisUtterance("Audio Enabled");
-  speechSynthesis.speak(utterance);
-  audioEnabled = true;
-  enableAudioBtn.disabled = true;
-  enableAudioBtn.textContent = "✅ Audio Enabled";
+// Load voices and ensure they're available
+function loadVoices() {
+  return new Promise((resolve) => {
+    let voices = speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      voicesLoaded = true;
+      resolve(voices);
+    } else {
+      speechSynthesis.onvoiceschanged = () => {
+        voices = speechSynthesis.getVoices();
+        voicesLoaded = true;
+        resolve(voices);
+      };
+    }
+  });
+}
+
+// Show status message
+function showStatus(message, isError = false) {
+  statusDiv.textContent = message;
+  statusDiv.className = isError ? "status error" : "status success";
+  statusDiv.style.display = "block";
+  setTimeout(() => {
+    statusDiv.style.display = "none";
+  }, 3000);
+}
+
+enableAudioBtn.addEventListener("click", async () => {
+  try {
+    // Load voices first
+    await loadVoices();
+    
+    // Test speech synthesis
+    const testUtterance = new SpeechSynthesisUtterance("Audio enabled");
+    testUtterance.volume = 0.1; // Quiet test
+    
+    testUtterance.onstart = () => {
+      audioEnabled = true;
+      enableAudioBtn.disabled = true;
+      enableAudioBtn.textContent = "✅ Audio Enabled";
+      showStatus("Audio enabled successfully!");
+    };
+    
+    testUtterance.onerror = (e) => {
+      console.error("Speech synthesis error:", e);
+      showStatus("Audio error: " + e.error, true);
+    };
+    
+    speechSynthesis.speak(testUtterance);
+    
+  } catch (error) {
+    console.error("Audio initialization error:", error);
+    showStatus("Could not enable audio. Please check device settings.", true);
+  }
 });
 
 if ("webkitSpeechRecognition" in window) {
@@ -111,7 +164,14 @@ if ("webkitSpeechRecognition" in window) {
     }
   };
 
-  recognition.onerror = (e) => { console.warn("Recognition error:", e); };
+  recognition.onerror = (e) => { 
+    console.warn("Recognition error:", e);
+    if (e.error === "no-speech") {
+      showStatus("No speech detected. Try speaking again.", true);
+    } else {
+      showStatus("Recognition error: " + e.error, true);
+    }
+  };
 } else {
   alert("Speech Recognition not supported in this browser.");
 }
@@ -134,7 +194,11 @@ function commitChunk() {
       addTranslation(transcript, translated);
       if(audioEnabled) speak(translated, langMap[to]);
     })
-    .catch(() => addTranslation(transcript, "(translation failed)"));
+    .catch((error) => {
+      console.error("Translation error:", error);
+      addTranslation(transcript, "(translation failed)");
+      showStatus("Translation error. Please try again.", true);
+    });
 }
 
 function addTranslation(original, translated) {
@@ -154,11 +218,42 @@ function addTranslation(original, translated) {
 }
 
 function speak(text, langCode) {
+  if (!audioEnabled) {
+    showStatus("Please enable audio first!", true);
+    return;
+  }
+  
+  // Cancel any ongoing speech
+  speechSynthesis.cancel();
+  
   const utterance = new SpeechSynthesisUtterance(text);
   const voices = speechSynthesis.getVoices();
-  const match = voices.find(v => v.lang.startsWith(langCode));
-  if (match) utterance.voice = match;
+  
+  // Better voice matching - try exact match first, then language prefix
+  let match = voices.find(v => v.lang === langCode);
+  if (!match) {
+    match = voices.find(v => v.lang.startsWith(langCode.substring(0, 2)));
+  }
+  
+  if (match) {
+    utterance.voice = match;
+  }
+  
   utterance.lang = langCode;
+  utterance.rate = 0.9; // Slightly slower for clarity
+  
+  utterance.onerror = (e) => {
+    console.error("Speech synthesis error:", e);
+    if (e.error === "not-allowed") {
+      showStatus("Audio blocked. Please enable audio again.", true);
+      audioEnabled = false;
+      enableAudioBtn.disabled = false;
+      enableAudioBtn.textContent = "🔊 Enable Audio";
+    } else {
+      showStatus("Speech error: " + e.error, true);
+    }
+  };
+  
   speechSynthesis.speak(utterance);
 }
 
@@ -169,24 +264,50 @@ toggleBtn.addEventListener("click", () => {
     recognition.start();
     listening = true;
     toggleBtn.textContent = "⏹ Stop";
+    showStatus("Listening...");
   } else {
     recognition.stop();
     listening = false;
     toggleBtn.textContent = "▶ Start";
     commitChunk();
+    showStatus("Stopped listening");
   }
 });
 
-// Replay all translations on user gesture
+// Replay all translations
 replayAllBtn.addEventListener("click", () => {
-  if (allTranslations.length === 0) {
-    alert("No translations to replay yet!");
+  if (!audioEnabled) {
+    showStatus("Please enable audio first!", true);
     return;
   }
+  
+  if (allTranslations.length === 0) {
+    showStatus("No translations to replay yet!", true);
+    return;
+  }
+  
+  // Cancel any ongoing speech
+  speechSynthesis.cancel();
+  
+  showStatus(`Replaying ${allTranslations.length} translations...`);
+  
   allTranslations.forEach((text, i) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = langMap[toLang.value];
-    setTimeout(() => speechSynthesis.speak(utterance), i * 1500);
+    setTimeout(() => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      const voices = speechSynthesis.getVoices();
+      const targetLang = langMap[toLang.value];
+      
+      let match = voices.find(v => v.lang === targetLang);
+      if (!match) {
+        match = voices.find(v => v.lang.startsWith(targetLang.substring(0, 2)));
+      }
+      if (match) utterance.voice = match;
+      
+      utterance.lang = targetLang;
+      utterance.rate = 0.9;
+      
+      speechSynthesis.speak(utterance);
+    }, i * 1500);
   });
 });
 
@@ -198,9 +319,11 @@ clearBtn.addEventListener("click", () => {
   liveText.textContent = "🎙️ Live text will appear here...";
   allTranslations = [];
   speechSynthesis.cancel();
+  showStatus("All translations cleared");
 });
 
-window.speechSynthesis.onvoiceschanged = () => {};
+// Load voices on startup
+loadVoices();
 </script>
 </body>
 </html>
