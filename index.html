@@ -27,16 +27,18 @@
 <select id="fromLang">
   <option value="en">English</option>
   <option value="es">Spanish</option>
-  <option value="sv">Swedish</option>
   <option value="fr">French</option>
+  <option value="de">German</option>
+  <option value="sv">Swedish</option>
 </select>
 
 <label for="toLang">🔊 Output Language:</label>
 <select id="toLang">
   <option value="en">English</option>
   <option value="es">Spanish</option>
-  <option value="sv">Swedish</option>
   <option value="fr">French</option>
+  <option value="de">German</option>
+  <option value="sv">Swedish</option>
 </select>
 
 <br><br>
@@ -57,14 +59,20 @@ const liveText = document.getElementById("liveText");
 const fromLang = document.getElementById("fromLang");
 const toLang = document.getElementById("toLang");
 
-const langMap = { "es":"es-ES", "en":"en-US", "sv":"sv-SE", "fr":"fr-FR" };
+const langMap = { 
+  "es": "es-ES", 
+  "en": "en-US", 
+  "sv": "sv-SE", 
+  "fr": "fr-FR",
+  "de": "de-DE"
+};
 
 let recognition;
 let currentTranscript = "";
-let lastSpeechTime = 0;
 let listening = false;
 let allTranslations = [];
 let audioEnabled = false;
+let silenceTimer = null;
 
 enableAudioBtn.addEventListener("click", () => {
   // Unlock speech synthesis on mobile
@@ -81,33 +89,39 @@ if ("webkitSpeechRecognition" in window) {
   recognition.interimResults = true;
 
   recognition.onresult = (event) => {
-    let interimTranscript = "";
-    let finalTranscript = "";
-    const now = Date.now();
-
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = (event.results[i][0].transcript || "").trim();
-      if (event.results[i].isFinal) {
-        finalTranscript += transcript + " ";
-      } else {
-        interimTranscript += transcript + " ";
-      }
+    // Clear any existing silence timer
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
     }
 
-    if (interimTranscript) {
-      liveText.textContent = "🎙️ " + interimTranscript;
-      currentTranscript = interimTranscript;
-      lastSpeechTime = now;
-    }
-
-    if (finalTranscript) {
-      liveText.textContent = "🎙️ " + finalTranscript;
-      currentTranscript = finalTranscript;
-      commitChunk();
-    }
-
-    if (lastSpeechTime && now - lastSpeechTime > 250) {
-      commitChunk();
+    // Get the latest result
+    const lastIndex = event.results.length - 1;
+    const result = event.results[lastIndex];
+    const transcript = (result[0].transcript || "").trim();
+    
+    if (!transcript) return;
+    
+    if (result.isFinal) {
+      // Final result - add to current transcript
+      currentTranscript += transcript + " ";
+      liveText.textContent = "🎙️ " + currentTranscript.trim();
+      
+      // Set timer to commit after natural pause
+      silenceTimer = setTimeout(() => {
+        commitChunk();
+      }, 700);
+    } else {
+      // Interim result - just display it
+      liveText.textContent = "🎙️ " + (currentTranscript + transcript).trim();
+      
+      // Set timer in case this is the last we hear
+      silenceTimer = setTimeout(() => {
+        if (transcript && !currentTranscript.includes(transcript)) {
+          currentTranscript += transcript + " ";
+          commitChunk();
+        }
+      }, 1200);
     }
   };
 
@@ -120,21 +134,23 @@ function commitChunk() {
   const transcript = currentTranscript.trim();
   if (!transcript) return;
 
-  currentTranscript = "";
-  lastSpeechTime = 0;
+  // Store the text we're about to translate
+  const textToTranslate = transcript;
+  currentTranscript = ""; // Clear for next phrase
+  silenceTimer = null;
   liveText.textContent = "🎙️ …";
 
   const from = fromLang.value;
   const to = toLang.value;
 
-  fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(transcript)}&langpair=${from}|${to}`)
+  fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(textToTranslate)}&langpair=${from}|${to}`)
     .then(res => res.json())
     .then(data => {
       const translated = data?.responseData?.translatedText || "(translation failed)";
-      addTranslation(transcript, translated);
+      addTranslation(textToTranslate, translated);
       if(audioEnabled) speak(translated, langMap[to]);
     })
-    .catch(() => addTranslation(transcript, "(translation failed)"));
+    .catch(() => addTranslation(textToTranslate, "(translation failed)"));
 }
 
 function addTranslation(original, translated) {
@@ -173,6 +189,7 @@ toggleBtn.addEventListener("click", () => {
     recognition.stop();
     listening = false;
     toggleBtn.textContent = "▶ Start";
+    if (silenceTimer) clearTimeout(silenceTimer);
     commitChunk();
   }
 });
