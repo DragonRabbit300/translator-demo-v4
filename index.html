@@ -73,7 +73,6 @@ let listening = false;
 let allTranslations = [];
 let audioEnabled = false;
 let silenceTimer = null;
-let lastProcessedLength = 0;
 
 enableAudioBtn.addEventListener("click", () => {
   // Unlock speech synthesis on mobile
@@ -90,46 +89,40 @@ if ("webkitSpeechRecognition" in window) {
   recognition.interimResults = true;
 
   recognition.onresult = (event) => {
-    let fullTranscript = "";
-
-    // Build the complete transcript from all final results
-    for (let i = 0; i < event.results.length; i++) {
-      const transcript = (event.results[i][0].transcript || "").trim();
-      if (event.results[i].isFinal) {
-        fullTranscript += transcript + " ";
-      }
-    }
-
-    // Get the latest interim result if still speaking
-    let interimTranscript = "";
-    if (event.results.length > 0) {
-      const lastResult = event.results[event.results.length - 1];
-      if (!lastResult.isFinal) {
-        interimTranscript = (lastResult[0].transcript || "").trim();
-      }
-    }
-
     // Clear any existing silence timer
     if (silenceTimer) {
       clearTimeout(silenceTimer);
       silenceTimer = null;
     }
 
-    // Only process new content (prevents Samsung duplicate issue)
-    if (fullTranscript.length > lastProcessedLength) {
-      currentTranscript = fullTranscript;
-      lastProcessedLength = fullTranscript.length;
+    // Process only NEW results starting from lastProcessedLength index
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const transcript = (event.results[i][0].transcript || "").trim();
+      
+      if (event.results[i].isFinal) {
+        // Add only the new final text
+        currentTranscript += transcript + " ";
+      } else {
+        // Show interim text (but don't add to currentTranscript yet)
+        liveText.textContent = "🎙️ " + (currentTranscript + transcript).trim();
+        
+        // Set timer for interim results
+        silenceTimer = setTimeout(() => {
+          // If we have interim text but no final, add it
+          if (transcript) {
+            currentTranscript += transcript + " ";
+            commitChunk();
+          }
+        }, 700);
+        return; // Don't process further if we have interim results
+      }
+    }
+
+    // If we got here, we have new final results
+    if (currentTranscript.trim()) {
       liveText.textContent = "🎙️ " + currentTranscript.trim();
       
       // Set timer to commit after natural pause
-      silenceTimer = setTimeout(() => {
-        commitChunk();
-      }, 700);
-    } else if (interimTranscript && !fullTranscript) {
-      // Show interim results while speaking
-      liveText.textContent = "🎙️ " + (currentTranscript + interimTranscript).trim();
-      
-      // Set timer for interim results too
       silenceTimer = setTimeout(() => {
         commitChunk();
       }, 700);
@@ -148,7 +141,6 @@ function commitChunk() {
   // Store the text we're about to translate
   const textToTranslate = transcript;
   currentTranscript = ""; // Clear for next phrase
-  lastProcessedLength = 0; // Reset the tracking
   silenceTimer = null;
   liveText.textContent = "🎙️ …";
 
@@ -197,7 +189,6 @@ toggleBtn.addEventListener("click", () => {
     recognition.start();
     listening = true;
     toggleBtn.textContent = "⏹ Stop";
-    lastProcessedLength = 0; // Reset tracking when starting
   } else {
     recognition.stop();
     listening = false;
