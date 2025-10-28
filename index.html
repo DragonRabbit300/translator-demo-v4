@@ -73,6 +73,7 @@ let listening = false;
 let allTranslations = [];
 let audioEnabled = false;
 let silenceTimer = null;
+let lastProcessedLength = 0;
 
 enableAudioBtn.addEventListener("click", () => {
   // Unlock speech synthesis on mobile
@@ -89,15 +90,22 @@ if ("webkitSpeechRecognition" in window) {
   recognition.interimResults = true;
 
   recognition.onresult = (event) => {
-    let interimTranscript = "";
-    let finalTranscript = "";
+    let fullTranscript = "";
 
-    for (let i = event.resultIndex; i < event.results.length; i++) {
+    // Build the complete transcript from all final results
+    for (let i = 0; i < event.results.length; i++) {
       const transcript = (event.results[i][0].transcript || "").trim();
       if (event.results[i].isFinal) {
-        finalTranscript += transcript + " ";
-      } else {
-        interimTranscript += transcript + " ";
+        fullTranscript += transcript + " ";
+      }
+    }
+
+    // Get the latest interim result if still speaking
+    let interimTranscript = "";
+    if (event.results.length > 0) {
+      const lastResult = event.results[event.results.length - 1];
+      if (!lastResult.isFinal) {
+        interimTranscript = (lastResult[0].transcript || "").trim();
       }
     }
 
@@ -107,16 +115,21 @@ if ("webkitSpeechRecognition" in window) {
       silenceTimer = null;
     }
 
-    // Accumulate transcript - keep building on it
-    if (finalTranscript) {
-      currentTranscript += finalTranscript;
+    // Only process new content (prevents Samsung duplicate issue)
+    if (fullTranscript.length > lastProcessedLength) {
+      currentTranscript = fullTranscript;
+      lastProcessedLength = fullTranscript.length;
       liveText.textContent = "🎙️ " + currentTranscript.trim();
-    } else if (interimTranscript) {
+      
+      // Set timer to commit after natural pause
+      silenceTimer = setTimeout(() => {
+        commitChunk();
+      }, 700);
+    } else if (interimTranscript && !fullTranscript) {
+      // Show interim results while speaking
       liveText.textContent = "🎙️ " + (currentTranscript + interimTranscript).trim();
-    }
-
-    // Only commit after a natural pause (700ms works well for conversation)
-    if (finalTranscript || interimTranscript) {
+      
+      // Set timer for interim results too
       silenceTimer = setTimeout(() => {
         commitChunk();
       }, 700);
@@ -135,6 +148,7 @@ function commitChunk() {
   // Store the text we're about to translate
   const textToTranslate = transcript;
   currentTranscript = ""; // Clear for next phrase
+  lastProcessedLength = 0; // Reset the tracking
   silenceTimer = null;
   liveText.textContent = "🎙️ …";
 
@@ -183,6 +197,7 @@ toggleBtn.addEventListener("click", () => {
     recognition.start();
     listening = true;
     toggleBtn.textContent = "⏹ Stop";
+    lastProcessedLength = 0; // Reset tracking when starting
   } else {
     recognition.stop();
     listening = false;
