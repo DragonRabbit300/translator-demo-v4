@@ -76,18 +76,32 @@ let silenceTimer = null;
 let lastProcessedLength = 0;
 
 enableAudioBtn.addEventListener("click", () => {
-  // Unlock speech synthesis on mobile
+  // Unlock speech synthesis on mobile (required for Samsung)
+  speechSynthesis.cancel(); // Clear any pending speech
   const utterance = new SpeechSynthesisUtterance("Audio Enabled");
+  utterance.volume = 0.1; // Very quiet test
   speechSynthesis.speak(utterance);
+  
   audioEnabled = true;
   enableAudioBtn.disabled = true;
   enableAudioBtn.textContent = "✅ Audio Enabled";
+  
+  // Load voices (Samsung specific)
+  if (speechSynthesis.getVoices().length === 0) {
+    speechSynthesis.addEventListener('voiceschanged', () => {
+      console.log("Voices loaded:", speechSynthesis.getVoices().length);
+    });
+  }
 });
 
-if ("webkitSpeechRecognition" in window) {
-  recognition = new webkitSpeechRecognition();
+// Samsung compatibility: check for both webkit and standard API
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (SpeechRecognition) {
+  recognition = new SpeechRecognition();
   recognition.continuous = true;
   recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
 
   recognition.onresult = (event) => {
     // Clear any existing silence timer
@@ -130,7 +144,32 @@ if ("webkitSpeechRecognition" in window) {
     }
   };
 
-  recognition.onerror = (e) => { console.warn("Recognition error:", e); };
+  recognition.onerror = (e) => { 
+    console.warn("Recognition error:", e.error);
+    // Samsung sometimes stops on 'no-speech' error, restart if needed
+    if (e.error === 'no-speech' && listening) {
+      setTimeout(() => {
+        if (listening) {
+          recognition.start();
+        }
+      }, 100);
+    }
+  };
+
+  // Samsung may stop unexpectedly, add handler to restart
+  recognition.onend = () => {
+    if (listening) {
+      setTimeout(() => {
+        if (listening) {
+          try {
+            recognition.start();
+          } catch (e) {
+            console.warn("Could not restart recognition:", e);
+          }
+        }
+      }, 100);
+    }
+  };
 } else {
   alert("Speech Recognition not supported in this browser.");
 }
@@ -176,24 +215,41 @@ function addTranslation(original, translated) {
 }
 
 function speak(text, langCode) {
-  const utterance = new SpeechSynthesisUtterance(text);
-  const voices = speechSynthesis.getVoices();
-  const match = voices.find(v => v.lang.startsWith(langCode));
-  if (match) utterance.voice = match;
-  utterance.lang = langCode;
-  speechSynthesis.speak(utterance);
+  // Cancel any ongoing speech
+  speechSynthesis.cancel();
+  
+  // Small delay helps with Samsung devices
+  setTimeout(() => {
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = speechSynthesis.getVoices();
+    const match = voices.find(v => v.lang.startsWith(langCode));
+    if (match) utterance.voice = match;
+    utterance.lang = langCode;
+    utterance.rate = 0.9; // Slightly slower for better clarity on Samsung
+    utterance.pitch = 1.0;
+    speechSynthesis.speak(utterance);
+  }, 100);
 }
 
 // Toggle start/stop
 toggleBtn.addEventListener("click", () => {
   if (!listening) {
-    recognition.lang = langMap[fromLang.value];
-    recognition.start();
-    listening = true;
-    toggleBtn.textContent = "⏹ Stop";
-    lastProcessedLength = 0; // Reset tracking when starting
+    try {
+      recognition.lang = langMap[fromLang.value];
+      recognition.start();
+      listening = true;
+      toggleBtn.textContent = "⏹ Stop";
+      lastProcessedLength = 0; // Reset tracking when starting
+    } catch (e) {
+      console.warn("Could not start recognition:", e);
+      alert("Could not start speech recognition. Please try again.");
+    }
   } else {
-    recognition.stop();
+    try {
+      recognition.stop();
+    } catch (e) {
+      console.warn("Error stopping recognition:", e);
+    }
     listening = false;
     toggleBtn.textContent = "▶ Start";
     if (silenceTimer) clearTimeout(silenceTimer);
