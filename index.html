@@ -1,3 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Real-Time Translator</title>
+<style>
+  body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+  button { padding: 12px 20px; margin: 10px; font-size: 16px; border-radius: 10px; border: none; background: #007BFF; color: white; cursor: pointer; }
+  button:disabled { background: gray; cursor: not-allowed; }
+  select { padding: 8px; font-size: 16px; margin: 5px; }
+  #translations, #liveText { margin-top: 20px; text-align: left; max-width: 500px; margin-left: auto; margin-right: auto; background: #f8f8f8; padding: 15px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+  #translations { max-height: 250px; overflow-y: auto; }
+  .chunk { padding: 5px 35px 5px 5px; margin-bottom: 5px; border-radius: 5px; background-color: #e0f7fa; position: relative; }
+  .replayBtn { position: absolute; right: 5px; top: 50%; transform: translateY(-50%); background: #007BFF; color: white; border: none; border-radius: 5px; padding: 2px 5px; cursor: pointer; font-size: 12px; }
+  #liveText { font-style: italic; color: #333; }
+</style>
+</head>
+
+<body>
+<h1>Real-Time Translator</h1>
+<p>Select languages and press Start:</p>
+
+<button id="enableAudioBtn">Enable Audio</button>
+
+<label for="fromLang">Input Language:</label>
+<select id="fromLang">
+  <option value="en">English</option>
+  <option value="es">Spanish</option>
+  <option value="fr">French</option>
+  <option value="de">German</option>
+  <option value="sv">Swedish</option>
+</select>
+
+<label for="toLang">Output Language:</label>
+<select id="toLang">
+  <option value="en">English</option>
+  <option value="es">Spanish</option>
+  <option value="fr">French</option>
+  <option value="de">German</option>
+  <option value="sv">Swedish</option>
+</select>
+
+<br><br>
+<button id="toggleBtn">Start</button>
+<button id="replayAllBtn">Replay All</button>
+<button id="clearBtn">Clear All</button>
+
+<div id="liveText">Live text will appear here...</div>
+<div id="translations"></div>
+
 <script>
 const enableAudioBtn = document.getElementById("enableAudioBtn");
 const toggleBtn = document.getElementById("toggleBtn");
@@ -8,7 +59,7 @@ const liveText = document.getElementById("liveText");
 const fromLang = document.getElementById("fromLang");
 const toLang = document.getElementById("toLang");
 
-const langMap = { 
+const langMap = {
   "es": "es-ES",
   "en": "en-US",
   "sv": "sv-SE",
@@ -22,10 +73,10 @@ let allTranslations = [];
 let audioEnabled = false;
 let silenceTimer = null;
 
-// Buffers for speech management
 let interimBuffer = "";
 let finalBuffer = "";
 
+// Enable Audio
 enableAudioBtn.addEventListener("click", () => {
   const utterance = new SpeechSynthesisUtterance("Audio Enabled");
   speechSynthesis.speak(utterance);
@@ -34,13 +85,13 @@ enableAudioBtn.addEventListener("click", () => {
   enableAudioBtn.textContent = "Audio Enabled";
 });
 
+// Initialize Speech Recognition
 if ("webkitSpeechRecognition" in window) {
   recognition = new webkitSpeechRecognition();
   recognition.continuous = true;
   recognition.interimResults = true;
 
   recognition.onresult = (event) => {
-    // Clear silence timer at the beginning of any new audio
     if (silenceTimer) {
       clearTimeout(silenceTimer);
       silenceTimer = null;
@@ -48,11 +99,9 @@ if ("webkitSpeechRecognition" in window) {
 
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const transcript = event.results[i][0].transcript.trim();
-
       if (!transcript) continue;
 
       if (event.results[i].isFinal) {
-        // FINAL RESULT — commit immediately
         interimBuffer = "";
         finalBuffer = transcript;
 
@@ -61,11 +110,9 @@ if ("webkitSpeechRecognition" in window) {
         commitChunk(finalBuffer);
         finalBuffer = "";
       } else {
-        // INTERIM RESULT
         interimBuffer = transcript;
         liveText.textContent = "🎙️ " + interimBuffer;
 
-        // If no final result follows within 1200ms, commit interim
         silenceTimer = setTimeout(() => {
           if (interimBuffer) {
             commitChunk(interimBuffer);
@@ -78,11 +125,11 @@ if ("webkitSpeechRecognition" in window) {
   };
 
   recognition.onerror = (e) => console.warn("Recognition error:", e);
-
 } else {
   alert("Speech Recognition not supported in this browser.");
 }
 
+// Process each chunk
 function commitChunk(text) {
   if (!text || !text.trim()) return;
 
@@ -99,6 +146,7 @@ function commitChunk(text) {
     .catch(() => addTranslation(text, "(translation failed)"));
 }
 
+// Add to history panel
 function addTranslation(original, translated) {
   const chunkDiv = document.createElement("div");
   chunkDiv.className = "chunk";
@@ -116,6 +164,7 @@ function addTranslation(original, translated) {
   allTranslations.push(translated);
 }
 
+// Speak output
 function speak(text, langCode) {
   const utterance = new SpeechSynthesisUtterance(text);
   const voices = speechSynthesis.getVoices();
@@ -125,6 +174,7 @@ function speak(text, langCode) {
   speechSynthesis.speak(utterance);
 }
 
+// Start/Stop mic
 toggleBtn.addEventListener("click", () => {
   if (!listening) {
     recognition.lang = langMap[fromLang.value];
@@ -135,9 +185,8 @@ toggleBtn.addEventListener("click", () => {
     recognition.stop();
     listening = false;
     toggleBtn.textContent = "Start";
-    if (silenceTimer) clearTimeout(silenceTimer);
 
-    // Commit any leftover interim text
+    if (silenceTimer) clearTimeout(silenceTimer);
     if (interimBuffer) {
       commitChunk(interimBuffer);
       interimBuffer = "";
@@ -145,6 +194,7 @@ toggleBtn.addEventListener("click", () => {
   }
 });
 
+// Replay all translations
 replayAllBtn.addEventListener("click", () => {
   if (allTranslations.length === 0) {
     alert("No translations to replay.");
@@ -158,14 +208,16 @@ replayAllBtn.addEventListener("click", () => {
   });
 });
 
+// Clear all history
 clearBtn.addEventListener("click", () => {
   if (!confirm("Clear all translations?")) return;
-
   translationsDiv.innerHTML = "";
-  liveText.textContent = "🎙️ Live text will appear here...";
+  liveText.textContent = "Live text will appear here...";
   allTranslations = [];
   speechSynthesis.cancel();
 });
 
 window.speechSynthesis.onvoiceschanged = () => {};
 </script>
+</body>
+</html>
