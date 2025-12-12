@@ -68,12 +68,9 @@ const langMap = {
 };
 
 let recognition;
-let currentTranscript = "";
 let listening = false;
 let allTranslations = [];
 let audioEnabled = false;
-let silenceTimer = null;
-let lastProcessedLength = 0;
 
 enableAudioBtn.addEventListener("click", () => {
   // Unlock speech synthesis on mobile (required for Samsung)
@@ -110,37 +107,43 @@ if (SpeechRecognition) {
       silenceTimer = null;
     }
 
-    // Process only NEW results starting from lastProcessedLength index
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = (event.results[i][0].transcript || "").trim();
+    let interimTranscript = "";
+    let finalTranscript = "";
+
+    // Collect all final and interim results
+    for (let i = 0; i < event.results.length; i++) {
+      const transcript = event.results[i][0].transcript;
       
       if (event.results[i].isFinal) {
-        // Add only the new final text
-        currentTranscript += transcript + " ";
+        finalTranscript += transcript + " ";
       } else {
-        // Show interim text (but don't add to currentTranscript yet)
-        liveText.textContent = "🎙️ " + (currentTranscript + transcript).trim();
-        
-        // Set timer for interim results
-        silenceTimer = setTimeout(() => {
-          // If we have interim text but no final, add it
-          if (transcript) {
-            currentTranscript += transcript + " ";
-            commitChunk();
-          }
-        }, 700);
-        return; // Don't process further if we have interim results
+        interimTranscript += transcript;
       }
     }
 
-    // If we got here, we have new final results
-    if (currentTranscript.trim()) {
-      liveText.textContent = "🎙️ " + currentTranscript.trim();
+    // If we have new final results, process them immediately
+    if (finalTranscript) {
+      const textToTranslate = finalTranscript.trim();
+      liveText.textContent = "🎙️ Translating...";
       
-      // Set timer to commit after natural pause
-      silenceTimer = setTimeout(() => {
-        commitChunk();
-      }, 700);
+      const from = fromLang.value;
+      const to = toLang.value;
+
+      fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(textToTranslate)}&langpair=${from}|${to}`)
+        .then(res => res.json())
+        .then(data => {
+          const translated = data?.responseData?.translatedText || "(translation failed)";
+          addTranslation(textToTranslate, translated);
+          if(audioEnabled) speak(translated, langMap[to]);
+          liveText.textContent = "🎙️ Listening...";
+        })
+        .catch(() => {
+          addTranslation(textToTranslate, "(translation failed)");
+          liveText.textContent = "🎙️ Listening...";
+        });
+    } else if (interimTranscript) {
+      // Just show interim results, don't translate yet
+      liveText.textContent = "🎙️ " + interimTranscript.trim();
     }
   };
 
@@ -150,7 +153,22 @@ if (SpeechRecognition) {
     if (e.error === 'no-speech' && listening) {
       setTimeout(() => {
         if (listening) {
-          recognition.start();
+          try {
+            recognition.start();
+          } catch (err) {
+            console.warn("Could not restart after no-speech:", err);
+          }
+        }
+      }, 100);
+    } else if (e.error === 'aborted' && listening) {
+      // Handle aborted errors by restarting
+      setTimeout(() => {
+        if (listening) {
+          try {
+            recognition.start();
+          } catch (err) {
+            console.warn("Could not restart after abort:", err);
+          }
         }
       }, 100);
     }
@@ -172,30 +190,6 @@ if (SpeechRecognition) {
   };
 } else {
   alert("Speech Recognition not supported in this browser.");
-}
-
-function commitChunk() {
-  const transcript = currentTranscript.trim();
-  if (!transcript) return;
-
-  // Store the text we're about to translate
-  const textToTranslate = transcript;
-  currentTranscript = ""; // Clear for next phrase
-  lastProcessedLength = 0; // Reset the tracking
-  silenceTimer = null;
-  liveText.textContent = "🎙️ …";
-
-  const from = fromLang.value;
-  const to = toLang.value;
-
-  fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(textToTranslate)}&langpair=${from}|${to}`)
-    .then(res => res.json())
-    .then(data => {
-      const translated = data?.responseData?.translatedText || "(translation failed)";
-      addTranslation(textToTranslate, translated);
-      if(audioEnabled) speak(translated, langMap[to]);
-    })
-    .catch(() => addTranslation(textToTranslate, "(translation failed)"));
 }
 
 function addTranslation(original, translated) {
@@ -239,7 +233,7 @@ toggleBtn.addEventListener("click", () => {
       recognition.start();
       listening = true;
       toggleBtn.textContent = "⏹ Stop";
-      lastProcessedLength = 0; // Reset tracking when starting
+      liveText.textContent = "🎙️ Listening...";
     } catch (e) {
       console.warn("Could not start recognition:", e);
       alert("Could not start speech recognition. Please try again.");
@@ -252,8 +246,7 @@ toggleBtn.addEventListener("click", () => {
     }
     listening = false;
     toggleBtn.textContent = "▶ Start";
-    if (silenceTimer) clearTimeout(silenceTimer);
-    commitChunk();
+    liveText.textContent = "🎙️ Live text will appear here...";
   }
 });
 
