@@ -6,78 +6,31 @@
   <title>Real-Time Translator</title>
 
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      padding: 20px;
-    }
-
+    body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
     button {
-      padding: 12px 20px;
-      margin: 10px;
-      font-size: 16px;
-      border-radius: 10px;
-      border: none;
-      background: #007BFF;
-      color: white;
-      cursor: pointer;
+      padding: 12px 20px; margin: 10px; font-size: 16px;
+      border-radius: 10px; border: none; background: #007BFF; color: white; cursor: pointer;
     }
+    button:disabled { background: gray; cursor: not-allowed; }
+    select { padding: 8px; font-size: 16px; margin: 5px; }
 
-    button:disabled {
-      background: gray;
-      cursor: not-allowed;
+    #translations, #liveText {
+      margin-top: 20px; text-align: left; max-width: 560px;
+      margin-left: auto; margin-right: auto; background: #f8f8f8;
+      padding: 15px; border-radius: 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      word-wrap: break-word;
     }
-
-    select {
-      padding: 8px;
-      font-size: 16px;
-      margin: 5px;
-    }
-
-    #translations,
-    #liveText {
-      margin-top: 20px;
-      text-align: left;
-      max-width: 500px;
-      margin-left: auto;
-      margin-right: auto;
-      background: #f8f8f8;
-      padding: 15px;
-      border-radius: 10px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-    }
-
-    #translations {
-      max-height: 250px;
-      overflow-y: auto;
-    }
-
+    #translations { max-height: 280px; overflow-y: auto; }
     .chunk {
-      padding: 5px 35px 5px 5px;
-      margin-bottom: 5px;
-      border-radius: 5px;
-      background-color: #e0f7fa;
-      position: relative;
+      padding: 8px 42px 8px 8px; margin-bottom: 8px; border-radius: 8px;
+      background-color: #e0f7fa; position: relative;
     }
-
     .replayBtn {
-      position: absolute;
-      right: 5px;
-      top: 50%;
-      transform: translateY(-50%);
-      background: #007BFF;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      padding: 2px 5px;
-      cursor: pointer;
-      font-size: 12px;
+      position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+      background: #007BFF; color: white; border: none; border-radius: 6px;
+      padding: 4px 8px; cursor: pointer; font-size: 12px;
     }
-
-    #liveText {
-      font-style: italic;
-      color: #333;
-    }
+    #liveText { font-style: italic; color: #333; }
   </style>
 </head>
 
@@ -132,95 +85,161 @@
       de: "de-DE"
     };
 
-    let recognition;
-    let currentTranscript = "";
+    // ---- iPhone-friendly tuning knobs ----
+    const SILENCE_MS = 1100;          // bigger = fewer requests, faster overall on mobile
+    const MIN_CHARS_TO_SEND = 6;      // prevents tiny chunks
+    const MAX_BUFFER_CHARS = 220;     // force send if user talks a long time
+    const TRANSLATE_TIMEOUT_MS = 9000;
+
+    let recognition = null;
     let listening = false;
-    let allTranslations = [];
-    let audioEnabled = false;
+
+    let finalBuffer = "";     // confirmed text
+    let interimBuffer = "";   // live partial
     let silenceTimer = null;
 
+    let allTranslations = [];
+    let audioEnabled = false;
+
+    let translateAbort = null;
+
+    // --- AUDIO: must be user-activated on iOS ---
     enableAudioBtn.addEventListener("click", () => {
-      const utterance = new SpeechSynthesisUtterance("Audio Enabled");
-      speechSynthesis.speak(utterance);
       audioEnabled = true;
       enableAudioBtn.disabled = true;
       enableAudioBtn.textContent = "✅ Audio Enabled";
+
+      // “Warm up” voices on iOS
+      const u = new SpeechSynthesisUtterance("Audio enabled");
+      u.lang = "en-US";
+      speechSynthesis.speak(u);
     });
 
-    if ("webkitSpeechRecognition" in window) {
-      recognition = new webkitSpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
+    function supportsSpeechRecognition() {
+      return ("webkitSpeechRecognition" in window) || ("SpeechRecognition" in window);
+    }
 
-      recognition.onresult = (event) => {
-        if (silenceTimer) {
-          clearTimeout(silenceTimer);
-          silenceTimer = null;
-        }
+    function createRecognition() {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const r = new SR();
 
+      // iOS/Safari can be weird with continuous; still try, but we auto-restart on end.
+      r.continuous = true;
+      r.interimResults = true;
+
+      r.onresult = (event) => {
+        // Pull the latest interim + final
+        let newInterim = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
-          const transcript = (event.results[i][0].transcript || "").trim();
+          const res = event.results[i];
+          const t = (res[0].transcript || "").trim();
+          if (!t) continue;
 
-          if (event.results[i].isFinal) {
-            currentTranscript += transcript + " ";
+          if (res.isFinal) {
+            finalBuffer += (t + " ");
           } else {
-            liveText.textContent = "🎙️ " + (currentTranscript + transcript).trim();
-
-            silenceTimer = setTimeout(() => {
-              if (transcript) {
-                currentTranscript += transcript + " ";
-                commitChunk();
-              }
-            }, 700);
-
-            return;
+            newInterim += (t + " ");
           }
         }
 
-        if (currentTranscript.trim()) {
-          liveText.textContent = "🎙️ " + currentTranscript.trim();
-          silenceTimer = setTimeout(commitChunk, 700);
+        interimBuffer = newInterim.trim();
+
+        // Update live UI
+        const combined = (finalBuffer + " " + interimBuffer).trim();
+        liveText.textContent = combined ? ("🎙️ " + combined) : "🎙️ …";
+
+        // Reset silence timer
+        if (silenceTimer) clearTimeout(silenceTimer);
+
+        // Commit on silence OR if buffer is getting huge
+        const combinedLen = (finalBuffer + " " + interimBuffer).trim().length;
+        if (combinedLen >= MAX_BUFFER_CHARS) {
+          commitChunk(); // force send
+        } else {
+          silenceTimer = setTimeout(commitChunk, SILENCE_MS);
         }
       };
 
-      recognition.onerror = (e) => {
+      r.onerror = (e) => {
         console.warn("Recognition error:", e);
+        // If iOS stops due to “no-speech” etc., we’ll recover via onend if listening = true.
       };
-    } else {
-      alert("Speech Recognition not supported in this browser.");
+
+      r.onend = () => {
+        // Safari iOS often stops randomly. If user still wants listening, restart.
+        if (listening) {
+          try {
+            r.lang = langMap[fromLang.value];
+            r.start();
+          } catch (err) {
+            // If restart fails, user can tap Start again.
+            console.warn("Restart failed:", err);
+          }
+        }
+      };
+
+      return r;
+    }
+
+    function safeSetListeningUI(isOn) {
+      listening = isOn;
+      toggleBtn.textContent = isOn ? "⏹ Stop" : "▶ Start";
     }
 
     function commitChunk() {
-      const transcript = currentTranscript.trim();
-      if (!transcript) return;
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
 
-      const textToTranslate = transcript;
-      currentTranscript = "";
-      silenceTimer = null;
-      liveText.textContent = "🎙️ …";
+      const textToTranslate = (finalBuffer + " " + interimBuffer).trim();
+      interimBuffer = "";
+      finalBuffer = "";
+
+      if (!textToTranslate || textToTranslate.length < MIN_CHARS_TO_SEND) {
+        liveText.textContent = "🎙️ …";
+        return;
+      }
+
+      liveText.textContent = "⏳ Translating…";
 
       const from = fromLang.value;
       const to = toLang.value;
 
-      fetch(
-        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(
-          textToTranslate
-        )}&langpair=${from}|${to}`
-      )
+      // Cancel any in-flight translation so mobile doesn’t “queue” old ones.
+      if (translateAbort) translateAbort.abort();
+      translateAbort = new AbortController();
+
+      const url =
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(textToTranslate)}&langpair=${from}|${to}`;
+
+      const timeout = setTimeout(() => {
+        try { translateAbort.abort(); } catch {}
+      }, TRANSLATE_TIMEOUT_MS);
+
+      fetch(url, { signal: translateAbort.signal })
         .then((res) => res.json())
         .then((data) => {
-          const translated =
-            data?.responseData?.translatedText || "(translation failed)";
+          clearTimeout(timeout);
+
+          const translated = data?.responseData?.translatedText || "(translation failed)";
           addTranslation(textToTranslate, translated);
+
           if (audioEnabled) speak(translated, langMap[to]);
+          liveText.textContent = "🎙️ …";
         })
-        .catch(() => addTranslation(textToTranslate, "(translation failed)"));
+        .catch((err) => {
+          clearTimeout(timeout);
+          if (err?.name === "AbortError") return; // expected cancellation
+          addTranslation(textToTranslate, "(translation failed)");
+          liveText.textContent = "🎙️ …";
+        });
     }
 
     function addTranslation(original, translated) {
       const chunkDiv = document.createElement("div");
       chunkDiv.className = "chunk";
-      chunkDiv.innerHTML = `<strong>${original}</strong> → ${translated}`;
+      chunkDiv.innerHTML = `<strong>${escapeHtml(original)}</strong><br/>→ ${escapeHtml(translated)}`;
 
       const replayBtn = document.createElement("button");
       replayBtn.textContent = "🔊";
@@ -234,27 +253,67 @@
       allTranslations.push(translated);
     }
 
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function pickVoice(langCode) {
+      const voices = speechSynthesis.getVoices() || [];
+      // iOS often returns region codes; match by prefix first (e.g., "es" matches "es-ES")
+      const prefix = (langCode || "").split("-")[0];
+      return (
+        voices.find(v => v.lang === langCode) ||
+        voices.find(v => v.lang && v.lang.startsWith(prefix)) ||
+        null
+      );
+    }
+
     function speak(text, langCode) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      const voices = speechSynthesis.getVoices();
-      const match = voices.find((v) => v.lang.startsWith(langCode));
-      if (match) utterance.voice = match;
-      utterance.lang = langCode;
-      speechSynthesis.speak(utterance);
+      try {
+        speechSynthesis.cancel(); // prevents long mobile queueing
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = langCode;
+
+        const voice = pickVoice(langCode);
+        if (voice) utterance.voice = voice;
+
+        speechSynthesis.speak(utterance);
+      } catch (e) {
+        console.warn("Speak failed:", e);
+      }
     }
 
     toggleBtn.addEventListener("click", () => {
+      if (!supportsSpeechRecognition()) {
+        alert("Speech Recognition is not fully supported on this iPhone browser. Try Safari directly (not inside an embedded webview).");
+        return;
+      }
+
+      if (!recognition) recognition = createRecognition();
+
       if (!listening) {
-        recognition.lang = langMap[fromLang.value];
-        recognition.start();
-        listening = true;
-        toggleBtn.textContent = "⏹ Stop";
+        // clear any leftover buffers
+        finalBuffer = "";
+        interimBuffer = "";
+        liveText.textContent = "🎙️ Listening…";
+
+        try {
+          recognition.lang = langMap[fromLang.value];
+          recognition.start();
+          safeSetListeningUI(true);
+        } catch (e) {
+          console.warn("Start failed:", e);
+          alert("Could not start mic. Make sure Safari has microphone permission for this site.");
+        }
       } else {
-        recognition.stop();
-        listening = false;
-        toggleBtn.textContent = "▶ Start";
-        if (silenceTimer) clearTimeout(silenceTimer);
-        commitChunk();
+        safeSetListeningUI(false);
+        try { recognition.stop(); } catch {}
+        commitChunk(); // translate whatever is left
       }
     });
 
@@ -263,12 +322,29 @@
         alert("No translations to replay yet!");
         return;
       }
+      if (!audioEnabled) {
+        alert("Tap 'Enable Audio' first (required on iPhone).");
+        return;
+      }
 
-      allTranslations.forEach((text, i) => {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = langMap[toLang.value];
-        setTimeout(() => speechSynthesis.speak(utterance), i * 1500);
-      });
+      speechSynthesis.cancel();
+      let i = 0;
+
+      // Speak sequentially (more reliable on iOS than setTimeout batching)
+      const speakNext = () => {
+        if (i >= allTranslations.length) return;
+        const u = new SpeechSynthesisUtterance(allTranslations[i]);
+        u.lang = langMap[toLang.value];
+        const v = pickVoice(u.lang);
+        if (v) u.voice = v;
+
+        u.onend = () => { i++; speakNext(); };
+        u.onerror = () => { i++; speakNext(); };
+
+        speechSynthesis.speak(u);
+      };
+
+      speakNext();
     });
 
     clearBtn.addEventListener("click", () => {
@@ -276,10 +352,16 @@
       translationsDiv.innerHTML = "";
       liveText.textContent = "🎙️ Live text will appear here...";
       allTranslations = [];
+      finalBuffer = "";
+      interimBuffer = "";
+      if (silenceTimer) clearTimeout(silenceTimer);
       speechSynthesis.cancel();
+      if (translateAbort) translateAbort.abort();
     });
 
+    // iOS loads voices lazily
     window.speechSynthesis.onvoiceschanged = () => {};
   </script>
 </body>
 </html>
+
