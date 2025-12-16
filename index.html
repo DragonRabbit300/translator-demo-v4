@@ -96,6 +96,7 @@
 
     let finalBuffer = "";     // confirmed text
     let interimBuffer = "";   // live partial
+    let lastFinalAdded = "";  // de-dupe for iOS repeated finals
     let silenceTimer = null;
 
     let allTranslations = [];
@@ -128,15 +129,19 @@
       r.interimResults = true;
 
       r.onresult = (event) => {
-        // Pull the latest interim + final
         let newInterim = "";
+
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const res = event.results[i];
           const t = (res[0].transcript || "").trim();
           if (!t) continue;
 
           if (res.isFinal) {
-            finalBuffer += (t + " ");
+            // iOS sometimes repeats the same final phrase; de-dupe
+            if (t !== lastFinalAdded) {
+              finalBuffer += (t + " ");
+              lastFinalAdded = t;
+            }
           } else {
             newInterim += (t + " ");
           }
@@ -144,16 +149,16 @@
 
         interimBuffer = newInterim.trim();
 
-        // Update live UI
+        // Display combined, but DO NOT translate interim
         const combined = (finalBuffer + " " + interimBuffer).trim();
         liveText.textContent = combined ? ("🎙️ " + combined) : "🎙️ …";
 
         // Reset silence timer
         if (silenceTimer) clearTimeout(silenceTimer);
 
-        // Commit on silence OR if buffer is getting huge
-        const combinedLen = (finalBuffer + " " + interimBuffer).trim().length;
-        if (combinedLen >= MAX_BUFFER_CHARS) {
+        // Commit on silence OR if FINAL buffer is getting huge
+        const finalLen = finalBuffer.trim().length;
+        if (finalLen >= MAX_BUFFER_CHARS) {
           commitChunk(); // force send
         } else {
           silenceTimer = setTimeout(commitChunk, SILENCE_MS);
@@ -162,7 +167,6 @@
 
       r.onerror = (e) => {
         console.warn("Recognition error:", e);
-        // If iOS stops due to “no-speech” etc., we’ll recover via onend if listening = true.
       };
 
       r.onend = () => {
@@ -172,7 +176,6 @@
             r.lang = langMap[fromLang.value];
             r.start();
           } catch (err) {
-            // If restart fails, user can tap Start again.
             console.warn("Restart failed:", err);
           }
         }
@@ -192,9 +195,13 @@
         silenceTimer = null;
       }
 
-      const textToTranslate = (finalBuffer + " " + interimBuffer).trim();
-      interimBuffer = "";
+      // ✅ ONLY translate finalized text
+      const textToTranslate = finalBuffer.trim();
+
+      // clear buffers
       finalBuffer = "";
+      interimBuffer = "";
+      lastFinalAdded = "";
 
       if (!textToTranslate || textToTranslate.length < MIN_CHARS_TO_SEND) {
         liveText.textContent = "🎙️ …";
@@ -264,7 +271,6 @@
 
     function pickVoice(langCode) {
       const voices = speechSynthesis.getVoices() || [];
-      // iOS often returns region codes; match by prefix first (e.g., "es" matches "es-ES")
       const prefix = (langCode || "").split("-")[0];
       return (
         voices.find(v => v.lang === langCode) ||
@@ -300,6 +306,7 @@
         // clear any leftover buffers
         finalBuffer = "";
         interimBuffer = "";
+        lastFinalAdded = "";
         liveText.textContent = "🎙️ Listening…";
 
         try {
@@ -313,7 +320,7 @@
       } else {
         safeSetListeningUI(false);
         try { recognition.stop(); } catch {}
-        commitChunk(); // translate whatever is left
+        commitChunk(); // translate whatever is left (final only)
       }
     });
 
@@ -330,7 +337,6 @@
       speechSynthesis.cancel();
       let i = 0;
 
-      // Speak sequentially (more reliable on iOS than setTimeout batching)
       const speakNext = () => {
         if (i >= allTranslations.length) return;
         const u = new SpeechSynthesisUtterance(allTranslations[i]);
@@ -354,6 +360,7 @@
       allTranslations = [];
       finalBuffer = "";
       interimBuffer = "";
+      lastFinalAdded = "";
       if (silenceTimer) clearTimeout(silenceTimer);
       speechSynthesis.cancel();
       if (translateAbort) translateAbort.abort();
